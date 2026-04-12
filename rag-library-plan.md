@@ -132,24 +132,38 @@ Query flow:
 User Question → Embedding → Vector Search → Rerank → Context Assembly → Response
 ```
 
-### 2.7 RAGCore Class (`src/core/RAG.ts`)
+### 2.7 LLM Provider (`src/llm/`)
+
+Interface for pluggable LLM backends (used by `queryAndAnswer`):
+
+```typescript
+interface LLMProvider {
+  generate(prompt: string, options?: LLMOptions): Promise<string>
+  stream(prompt: string, options?: LLMOptions): AsyncIterable<string>
+}
+```
+
+Initial implementations:
+- OpenAI-compatible API (covers OpenAI, Ollama, vLLM, LiteLLM, etc.)
+
+### 2.8 RAGCore Class (`src/core/RAG.ts`)
 
 Main entry point combining all modules:
 
 ```typescript
 class RAG {
   constructor(config: RAGConfig);
-  
+
   // Document management
   addDocument(file: FileInput, options?: DocOptions): Promise<DocumentInfo>;
   addDocuments(files: FileInput[]): Promise<DocumentInfo[]>;
   removeDocument(id: string): Promise<void>;
   listDocuments(): Promise<DocumentInfo[]>;
-  
+
   // Query operations
   query(question: string, options?: QueryOptions): Promise<QueryResult>;
-  queryAndAnswer(question: string, options?: QueryOptions): Promise<{ answer: string; context: SearchResult[] }>;
-  
+  queryAndAnswer(question: string, options?: QueryOptions & { llm?: LLMProvider }): Promise<{ answer: string; context: SearchResult[] }>;
+
   // Configuration
   updateConfig(partial: Partial<RAGConfig>): void;
 }
@@ -172,45 +186,42 @@ rag-typescript/
 │   │   ├── index.ts              # Parser factory
 │   │   ├── base.ts               # Abstract parser
 │   │   ├── text.ts               # .txt parser
-│   │   ├── markdown.ts           # .md parser
-│   │   ├── docx.ts               # .docx parser
-│   │   └── pdf.ts                # .pdf parser
+│   │   └── markdown.ts           # .md parser
 │   ├── chunking/
 │   │   ├── index.ts
-│   │   ├── strategies.ts         # Chunking strategies
-│   │   └── utils.ts              # Token counting, etc.
+│   │   └── strategies.ts         # Chunking strategies
 │   ├── embeddings/
 │   │   ├── index.ts
-│   │   ├── providers.ts          # Provider abstract class
-│   │   ├── openai.ts             # OpenAI embedding
-│   │   ├── ollama.ts             # Ollama embedding
-│   │   └── huggingface.ts        # HF Inference API
+│   │   └── openai-compatible.ts  # OpenAI-compatible provider
 │   ├── storage/
 │   │   ├── index.ts
-│   │   ├── base.ts               # VectorStore interface
-│   │   ├── in-memory.ts          # Simple in-memory store
-│   │   ├── sqlite.ts             # SQLite backend (optional)
-│   │   └── chroma.ts             # ChromaDB backend (optional)
-│   └── query/
-│       ├── index.ts
-│       ├── engine.ts             # Query engine
-│       └── reranker.ts           # Result reranking
+│   │   └── in-memory.ts          # In-memory vector store
+│   ├── llm/
+│   │   ├── index.ts
+│   │   └── openai-compatible.ts  # OpenAI-compatible LLM provider
+│   ├── query/
+│   │   ├── index.ts
+│   │   └── engine.ts             # Query engine
+│   ├── errors/
+│   │   └── index.ts              # Custom error types
+│   └── logger/
+│       └── index.ts              # Logger interface
 ├── tests/
 │   ├── parsers/
 │   ├── chunking/
 │   ├── embeddings/
 │   ├── storage/
+│   ├── llm/
 │   └── integration/
 ├── examples/
-│   ├── basic-query.ts            # Simple usage example
-│   ├── multi-file.ts             # Multiple file sources
-│   ├── custom-embedding.ts       # Custom embedding model
-│   └── advanced-query.ts         # Hybrid search + reranking
+│   └── basic.ts                  # Simple usage example
 ├── package.json
 ├── tsconfig.json
 ├── README.md
 └── LICENSE
 ```
+
+**Note:** Phase 1 includes only the minimal set above. DOCX/PDF parsers, additional embedding providers, and persistent vector stores are deferred to later phases.
 
 ---
 
@@ -218,15 +229,48 @@ rag-typescript/
 
 ### Required
 - `uuid`: For document/chunk ID generation
-- `dotenv`: For environment configuration
 
-### Optional (by feature)
-- `mammoth`: DOCX parsing
-- `pdf-parse` or `@pdf-lib/...`: PDF parsing
-- `marked`: Markdown parsing (optional)
-- `better-sqlite3`: SQLite vector storage
-- `openai`: Official OpenAI SDK
-- `axios`: Generic HTTP client for APIs
+### Optional peer dependencies (installed by user as needed)
+- `openai`: OpenAI-compatible API client (embeddings + LLM)
+- `mammoth`: DOCX parsing (Phase 2+)
+- `pdf-parse` or `pdfjs-dist`: PDF parsing (Phase 2+)
+- `marked`: Markdown structure-aware chunking (optional)
+- `better-sqlite3`: SQLite vector storage (Phase 3+)
+
+**Strategy:** Parser backends for heavy formats (DOCX, PDF) are loaded via dynamic `import()` so the core library remains lightweight. Users only install what they need.
+
+---
+
+## 4.1 Error Handling
+
+Custom error types for clear, actionable feedback:
+
+```typescript
+class RAGError extends Error {}
+class ParseError extends RAGError {}
+class EmbeddingError extends RAGError {}
+class VectorStoreError extends RAGError {}
+class LLMError extends RAGError {}
+```
+
+All public methods should catch internal errors and re-throw as the appropriate `RAGError` subclass with context.
+
+## 4.2 Logging / Telemetry
+
+Minimal logger interface — no hard dependency on any logging library:
+
+```typescript
+interface Logger {
+  debug(msg: string, ...args: unknown[]): void
+  info(msg: string, ...args: unknown[]): void
+  warn(msg: string, ...args: unknown[]): void
+  error(msg: string, ...args: unknown[]): void
+}
+```
+
+- A `NoopLogger` is the default (zero output).
+- Users can plug in `pino`, `winston`, `console`, or their own implementation.
+- Internal components receive the logger via config and use it for diagnostics.
 
 ---
 
@@ -234,28 +278,31 @@ rag-typescript/
 
 ### Phase 1: MVP (Week 1-2)
 - [ ] Core types and interfaces
-- [ ] Text (.txt) and Markdown (.md) parsers
-- [ ] Basic fixed-size chunking
-- [ ] OpenAI embedding provider
-- [ ] In-memory vector store with cosine similarity
-- [ ] Basic RAG class with addDocument() and query()
+- [ ] Text (.txt) and Markdown (.md) parsers only
+- [ ] Basic fixed-size chunking only
+- [ ] OpenAI-compatible embedding provider (covers Ollama, vLLM, etc.)
+- [ ] In-memory vector store only (no persistent backends)
+- [ ] OpenAI-compatible LLM provider
+- [ ] Custom error types (`RAGError` hierarchy)
+- [ ] Logger interface + `NoopLogger` default
+- [ ] Basic RAG class with `addDocument()` and `query()`
 
 ### Phase 2: Extended Formats (Week 3)
-- [ ] DOCX parser
-- [ ] PDF parser
+- [ ] DOCX parser (peer dep, dynamic import)
+- [ ] PDF parser (peer dep, dynamic import)
 - [ ] Recursive chunking strategy
-- [ ] Ollama embedding provider
+- [ ] Markdown-aware chunking
 
-### Phase 3: Advanced Features (Week 4+)
-- [ ] Multiple vector store backends (SQLite, ChromaDB)
+### Phase 3: Advanced Storage & Search (Week 4+)
+- [ ] Multiple vector store backends (SQLite, ChromaDB, Qdrant)
 - [ ] Hybrid search (dense + BM25)
 - [ ] Reranking support
-- [ ] Full-text query generation (query rewriting)
 - [ ] Persistent storage
+- [ ] Query rewriting
 
 ### Phase 4: Polish (Week 5+)
 - [ ] Comprehensive tests
-- [ ] Documentation examples
+- [ ] Documentation & examples
 - [ ] TypeScript declaration files
 - [ ] Performance optimizations
 - [ ] CLI tool (optional)
@@ -265,36 +312,46 @@ rag-typescript/
 ## 6. API Usage Example
 
 ```typescript
-import { RAG, OpenAIEmbeddings, InMemoryVectorStore } from 'rag-typescript';
+import {
+  RAG,
+  OpenAICompatibleEmbeddings,
+  OpenAICompatibleLLM,
+  InMemoryVectorStore,
+} from 'rag-typescript';
 
 // Initialize
 const rag = new RAG({
-  embeddings: new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY }),
+  embeddings: new OpenAICompatibleEmbeddings({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.EMBEDDING_BASE_URL, // optional — works with Ollama too
+  }),
   vectorStore: new InMemoryVectorStore(),
-  chunking: { strategy: 'recursive', size: 500, overlap: 50 },
+  chunking: { strategy: 'fixed', size: 500, overlap: 50 },
 });
 
 // Add files
 await rag.addDocuments([
   './docs/intro.txt',
   './docs/guide.md',
-  './reports/quarterly.docx',
-  './specs/api.pdf',
 ]);
 
-// Query
+// Retrieve context
 const result = await rag.query('What is the main feature?', {
   topK: 3,
   scoreThreshold: 0.7,
 });
 
 console.log(result.context); // Retrieved chunks
-console.log(result.scores);  // Relevance scores
 
-// With answer generation
+// With answer generation (requires LLM provider)
 const { answer, context } = await rag.queryAndAnswer(
   'How do I configure the API endpoint?',
-  { llm: myLLMClient }
+  {
+    llm: new OpenAICompatibleLLM({
+      apiKey: process.env.OPENAI_API_KEY,
+      model: 'gpt-4o-mini',
+    }),
+  }
 );
 ```
 
