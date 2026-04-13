@@ -1,0 +1,165 @@
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { InMemoryVectorStore } from "../src/storage/index.ts";
+import { VectorStoreError } from "../src/errors/index.ts";
+
+describe("InMemoryVectorStore", () => {
+  it("should add records and report correct size", async () => {
+    const store = new InMemoryVectorStore();
+    expect(store.size).toBe(0);
+
+    await store.add(
+      [
+        [1, 0, 0],
+        [0, 1, 0],
+      ],
+      [{ content: "a" }, { content: "b" }]
+    );
+
+    expect(store.size).toBe(2);
+  });
+
+  it("should auto-generate IDs when not provided", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0]], [{ content: "x" }]);
+    expect(store.size).toBe(1);
+  });
+
+  it("should use provided IDs", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0]], [{ content: "x" }], ["my-id"]);
+    const results = await store.search([1, 0], 5);
+    expect(results[0].id).toBe("my-id");
+  });
+
+  it("should throw if embeddings and metadatas length mismatch", async () => {
+    const store = new InMemoryVectorStore();
+    await expect(
+      store.add([[1, 0]], [{}, {}])
+    ).rejects.toThrow(VectorStoreError);
+  });
+});
+
+describe("InMemoryVectorStore — search", () => {
+  it("should return results sorted by cosine similarity", async () => {
+    const store = new InMemoryVectorStore();
+    // Normalized vectors for predictable similarity
+    await store.add(
+      [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0.707, 0.707, 0],
+      ],
+      [
+        { content: "aligned" },
+        { content: "orthogonal" },
+        { content: "diagonal" },
+      ]
+    );
+
+    const results = await store.search([1, 0, 0], 10);
+    expect(results.length).toBe(3);
+    // [1,0,0] vs [1,0,0] = 1.0 (highest)
+    expect(results[0].content).toBe("aligned");
+    expect(results[0].score).toBeCloseTo(1, 5);
+  });
+
+  it("should respect limit", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add(
+      [
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ],
+      [{ content: "a" }, { content: "b" }, { content: "c" }]
+    );
+
+    const results = await store.search([1, 0], 1);
+    expect(results.length).toBe(1);
+  });
+
+  it("should filter by metadata", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [{ content: "visible", category: "a" }, { content: "hidden", category: "b" }]
+    );
+
+    const results = await store.search([1, 0], 10, { category: "a" });
+    expect(results.length).toBe(1);
+    expect(results[0].content).toBe("visible");
+  });
+
+  it("should throw on dimension mismatch", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0, 0]], [{ content: "x" }]);
+    await expect(store.search([1, 0], 5)).rejects.toThrow(VectorStoreError);
+  });
+
+  it("should return 0 similarity for zero vectors", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[0, 0, 0]], [{ content: "zero" }]);
+    const results = await store.search([1, 0, 0], 5);
+    expect(results[0].score).toBe(0);
+  });
+});
+
+describe("InMemoryVectorStore — delete", () => {
+  it("should remove records by ID", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [{ content: "a" }, { content: "b" }],
+      ["id-a", "id-b"]
+    );
+
+    await store.delete(["id-a"]);
+    expect(store.size).toBe(1);
+
+    const results = await store.search([0, 1], 5);
+    expect(results[0].content).toBe("b");
+  });
+
+  it("should be a no-op for non-existent IDs", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0]], [{ content: "x" }], ["id-1"]);
+    await store.delete(["nonexistent"]);
+    expect(store.size).toBe(1);
+  });
+});
+
+describe("InMemoryVectorStore — persistence", () => {
+  let tmpDir: string;
+
+  beforeAll(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rag-store-"));
+  });
+
+  afterAll(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("should save and load records", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[0.6, 0.8]], [{ content: "persisted" }], ["p-1"]);
+
+    const filePath = path.join(tmpDir, "store.json");
+    await store.save(filePath);
+
+    const store2 = new InMemoryVectorStore();
+    await store2.load(filePath);
+
+    expect(store2.size).toBe(1);
+    const results = await store2.search([0.6, 0.8], 5);
+    expect(results[0].content).toBe("persisted");
+  });
+});
