@@ -5,8 +5,8 @@ A modular TypeScript library for managing **Retrieval-Augmented Generation (RAG)
 ## Features
 
 - **Pluggable architecture** — swap embedding models, LLM providers, and vector stores independently
-- **Multi-format document parsing** — `.txt`, `.md` (Phase 1); `.docx`, `.pdf` (Phase 2+)
-- **Flexible chunking** — fixed-size strategy with configurable overlap; recursive & semantic planned
+- **Multi-format document parsing** — `.txt`, `.md`, `.docx`, `.pdf` with lazy-loaded optional parsers
+- **Flexible chunking** — fixed-size, recursive (paragraphs → sentences), and markdown-aware (headings, code blocks)
 - **OpenAI-compatible API support** — works with OpenAI, Ollama, vLLM, LiteLLM, and any compatible endpoint
 - **Zero-setup defaults** — in-memory vector store with cosine similarity and JSON persistence
 - **Fully typed** — end-to-end TypeScript with declaration files and strict mode
@@ -17,20 +17,19 @@ A modular TypeScript library for managing **Retrieval-Augmented Generation (RAG)
 npm install rag-typescript
 ```
 
-### Peer dependencies
+### Optional dependencies
 
-For production usage you'll typically also install:
+Install only the parsers you need:
+
+```bash
+npm install mammoth         # .docx parsing (optional)
+npm install pdf-parse       # .pdf parsing (optional)
+```
+
+Additional optional peer dependencies:
 
 ```bash
 npm install openai          # required for embedding & LLM providers
-```
-
-Additional optional dependencies (Phase 2+):
-
-```bash
-npm install mammoth         # .docx parsing
-npm install pdf-parse       # .pdf parsing
-npm install marked          # markdown-aware chunking
 ```
 
 ## Quick Start
@@ -53,10 +52,12 @@ const rag = new RAG({
   chunking: { strategy: 'fixed', size: 500, overlap: 50 },
 });
 
-// Add documents
+// Add documents — now supports .txt, .md, .docx, and .pdf
 await rag.addDocuments([
   './docs/intro.txt',
   './docs/guide.md',
+  './docs/report.docx',   // requires mammoth
+  './docs/manual.pdf',    // requires pdf-parse
 ]);
 
 // Retrieve context
@@ -112,7 +113,7 @@ Main entry point combining all modules.
 |--------|-------------|
 | `addDocument(file)` | Parse, chunk, and embed a single file |
 | `addDocuments(files)` | Batch-add multiple files (sequential) |
-| `removeDocument(id)` | Remove a document from tracking (note: chunks remain in vector store) |
+| `removeDocument(id)` | Remove a document and its chunks from the vector store |
 | `listDocuments()` | List all ingested documents |
 | `query(question, options?)` | Retrieve relevant chunks |
 | `queryAndAnswer(question, options)` | Retrieve context and generate an answer (requires `options.llm`) |
@@ -129,7 +130,18 @@ interface ChunkOptions {
 }
 ```
 
-> **Note:** Currently only `'fixed'` strategy is implemented. `'recursive'` and `'semantic'` will throw `ChunkingError`.
+**Examples:**
+
+```typescript
+// Fixed-size: split every 500 characters with 50-char overlap
+chunking: { strategy: 'fixed', size: 500, overlap: 50 }
+
+// Recursive: split by paragraphs → sentences → fixed-size fallback
+chunking: { strategy: 'recursive', size: 500, overlap: 50 }
+
+// Markdown-aware: preserve headings, never split code blocks
+chunking: { strategy: 'semantic', size: 500, overlap: 50 }
+```
 
 ### Search Options
 
@@ -175,13 +187,15 @@ src/
 │   ├── RAG.ts                # Main RAG class
 │   └── utils.ts              # Common utilities
 ├── parsers/
-│   ├── index.ts              # Parser factory
+│   ├── index.ts              # Parser factory (lazy-loads optional parsers)
 │   ├── base.ts               # Abstract parser
 │   ├── text.ts               # .txt parser
-│   └── markdown.ts           # .md parser
+│   ├── markdown.ts           # .md parser
+│   ├── docx.ts               # .docx parser (mammoth, optional)
+│   └── pdf.ts                # .pdf parser (pdf-parse, optional)
 ├── chunking/
 │   ├── index.ts
-│   └── strategies.ts         # Chunking strategies
+│   └── strategies.ts         # Fixed, recursive, and markdown-aware strategies
 ├── embeddings/
 │   ├── index.ts
 │   └── openai-compatible.ts  # OpenAI-compatible provider
@@ -220,37 +234,36 @@ npm run test:watch  # Watch mode
 
 ## Test Coverage
 
-Phase 1 ships with **89 tests** covering all modules:
+The project ships with **139 tests** across 12 test files:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
 | Errors | 10 | Hierarchy, cause propagation |
 | Logger | 3 | NoopLogger, custom implementations |
-| Chunking | 11 | Fixed strategy, validation, unimplemented strategies |
-| Parsers | 15 | TextParser, MarkdownParser, front-matter, factory |
-| Storage | 12 | CRUD, cosine search, filtering, persistence |
-| Embeddings | 7 | Config, mocked API calls, error handling |
-| LLM | 9 | Generate, streaming, error handling |
-| Query Engine | 5 | Retrieval, threshold filtering, answer generation |
-| RAG Core | 11 | Document management, query, config updates |
+| Chunking | 21 | Fixed, recursive, and markdown-aware strategies; overlap behavior |
+| Parsers | 17 | TextParser, MarkdownParser, DocxParser, PdfParser, factory |
+| Storage | 16 | CRUD, cosine search, filtering, persistence, validation |
+| Embeddings | 9 | Config, mocked API calls, error handling, dimensions, response validation |
+| LLM | 11 | Generate, streaming, error handling, empty responses |
+| Query Engine | 12 | Retrieval, threshold filtering, answer generation, injection safety |
+| RAG Core | 18 | Document management, query, config updates, duplicate detection, cleanup |
 | Integration | 6 | Full addDocument → query flow with real store |
 
 API providers use **mocked `fetch`** — no network calls during tests.
 
 ## Known Limitations
 
-- **Chunking:** Only `'fixed'` strategy is implemented. `'recursive'` and `'semantic'` throw errors.
-- **Document removal:** `removeDocument()` removes from internal tracking but does **not** delete chunks from the vector store.
 - **Metadata filtering:** Exact-match only; no range queries, operators, or regex support.
 - **Logger:** Only `NoopLogger` is provided; no console or file logger implementation yet.
-- **Parser coverage:** Only `.txt`, `.md`, and `.markdown` files are supported.
+- **DOCX parsing:** Requires `mammoth` peer dependency — installed automatically via `bun add mammoth`.
+- **PDF parsing:** Requires `pdf-parse` peer dependency — installed automatically via `bun add pdf-parse`.
 
 ## Roadmap
 
 | Phase | Status | Highlights |
 |-------|--------|------------|
-| **Phase 1: MVP** | ✅ Complete | Text/MD parsers, fixed chunking, OpenAI-compatible providers, in-memory store, 89 tests |
-| **Phase 2: Extended Formats** | Planned | DOCX/PDF parsers, recursive & markdown-aware chunking |
+| **Phase 1: MVP** | ✅ Complete | Text/MD parsers, fixed chunking, OpenAI-compatible providers, in-memory store |
+| **Phase 2: Extended Formats** | ✅ Complete | DOCX/PDF parsers, recursive & markdown-aware chunking, 139 tests |
 | **Phase 3: Advanced Storage** | Planned | SQLite, ChromaDB, Qdrant backends; hybrid search; reranking |
 | **Phase 4: Polish** | Planned | CLI tool, performance optimizations |
 

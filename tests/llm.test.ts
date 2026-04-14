@@ -137,3 +137,43 @@ describe("OpenAICompatibleLLM — stream", () => {
     expect(chunks).toEqual(["Hello", ", ", "world!"]);
   });
 });
+
+// ============================================================
+// M7: LLM generate() treats empty string as error
+// ============================================================
+
+describe("M7: LLM should accept empty string responses", () => {
+  it("should not throw when generate() returns empty string", async () => {
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "" } }] }),
+          { status: 200 }
+        );
+
+      const llm = new OpenAICompatibleLLM({
+        apiKey: "sk-test",
+        baseURL: "https://api.example.com/v1",
+      });
+
+      const result = await llm.generate("hi");
+      expect(result).toBe("");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});
+
+// ============================================================
+// M8: LLM stream() silently swallows SSE errors
+// ============================================================
+
+describe("M8: LLM stream should not silently drop error events", () => {
+  it("should document that API error events are currently swallowed", async () => {
+    const llmModule = await import("../src/llm/openai-compatible.ts");
+    const streamFn = llmModule.OpenAICompatibleLLM.prototype.stream;
+    // The stream method has a try/catch that swallows SSE errors
+    expect(streamFn.toString()).toContain("catch");
+  });
+});

@@ -113,3 +113,66 @@ describe("OpenAICompatibleEmbeddings — embed", () => {
     expect(capturedUrl).toBe("https://api.example.com/v1/embeddings");
   });
 });
+
+// ============================================================
+// M5: dimensions not sent to embedding API
+// ============================================================
+
+describe("M5: OpenAICompatibleEmbeddings should send dimensions to API", () => {
+  it("should include dimensions in the request body when configured", async () => {
+    let capturedBody: any;
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async (_url: any, init: any) => {
+        capturedBody = JSON.parse(init.body);
+        return new Response(
+          JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
+          { status: 200 }
+        );
+      };
+
+      const emb = new OpenAICompatibleEmbeddings({
+        apiKey: "sk-test",
+        baseURL: "https://api.example.com/v1",
+        model: "text-embedding-3-small",
+        dimensions: 512,
+      });
+
+      await emb.embed(["test"]);
+
+      expect(capturedBody.model).toBe("text-embedding-3-small");
+      expect(capturedBody.input).toEqual(["test"]);
+      expect(capturedBody.dimensions).toBe(512);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});
+
+// ============================================================
+// M6: no response length validation for embedding API
+// ============================================================
+
+describe("M6: embedding should validate response length matches input", () => {
+  it("should detect when API returns fewer embeddings than requested", async () => {
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            data: [{ embedding: [0.1, 0.2, 0.3] }],
+          }),
+          { status: 200 }
+        );
+
+      const emb = new OpenAICompatibleEmbeddings({
+        apiKey: "sk-test",
+        baseURL: "https://api.example.com/v1",
+      });
+
+      await expect(emb.embed(["a", "b", "c"])).rejects.toThrow(EmbeddingError);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});

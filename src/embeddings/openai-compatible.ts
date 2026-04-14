@@ -39,6 +39,15 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
 
     const url = `${this.baseURL.replace(/\/+$/, '')}/embeddings`;
 
+    // Build request body — include dimensions when explicitly configured
+    const body: Record<string, unknown> = {
+      model: this.model,
+      input: texts,
+    };
+    if (this.dimensions !== DEFAULT_DIMENSIONS) {
+      body.dimensions = this.dimensions;
+    }
+
     let response: Response;
     try {
       response = await fetch(url, {
@@ -47,10 +56,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({
-          model: this.model,
-          input: texts,
-        }),
+        body: JSON.stringify(body),
       });
     } catch (err) {
       throw new EmbeddingError(`Network error calling embeddings API: ${url}`, {
@@ -59,13 +65,21 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
+      const bodyText = await response.text().catch(() => '');
       throw new EmbeddingError(
-        `Embeddings API error ${response.status}: ${body}`,
+        `Embeddings API error ${response.status}: ${bodyText}`,
       );
     }
 
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
+
+    // M6: Validate response length matches input
+    if (json.data.length !== texts.length) {
+      throw new EmbeddingError(
+        `Embedding API returned ${json.data.length} embeddings for ${texts.length} texts`,
+      );
+    }
+
     return json.data.map((d) => d.embedding);
   }
 }

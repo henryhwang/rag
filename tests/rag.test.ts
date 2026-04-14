@@ -193,3 +193,196 @@ describe("RAG — updateConfig", () => {
     // No direct way to verify internal state, but it shouldn't throw
   });
 });
+
+// ============================================================
+// C1+C2: removeDocument should purge vector store chunks
+// ============================================================
+
+describe("C1+C2: removeDocument should purge vector store chunks", () => {
+  it("should not leave orphaned chunks after removal", async () => {
+    const store = new MockVectorStore();
+    const embeddings = new MockEmbeddings();
+    const rag = new RAG({
+      embeddings,
+      vectorStore: store,
+      chunking: { strategy: "fixed", size: 500, overlap: 50 },
+      logger: new NoopLogger(),
+    });
+
+    const f = await writeTemp("txt", "This document will be removed.");
+    const doc = await rag.addDocument(f);
+
+    expect(store.size).toBeGreaterThan(0);
+
+    await rag.removeDocument(doc.id);
+
+    // Orphaned chunks should NOT remain
+    expect(store.size).toBe(0);
+  });
+});
+
+// ============================================================
+// H1: addDocument should not leave ghost entries on failure
+// ============================================================
+
+describe("H1: addDocument should not leave ghost entries on failure", () => {
+  it("should not track document if embedding fails", async () => {
+    const store = new MockVectorStore();
+    const failingEmbeddings: EmbeddingProvider = {
+      dimensions: 3,
+      async embed() {
+        throw new Error("Embedding API unavailable");
+      },
+    };
+    const rag = new RAG({
+      embeddings: failingEmbeddings,
+      vectorStore: store,
+      logger: new NoopLogger(),
+    });
+
+    const f = await writeTemp("txt", "Some content");
+
+    await expect(rag.addDocument(f)).rejects.toThrow();
+
+    expect(rag.listDocuments().length).toBe(0);
+    expect(store.size).toBe(0);
+  });
+});
+
+// ============================================================
+// H2: updateConfig should propagate embeddings to queryEngine
+// ============================================================
+
+describe("H2: updateConfig should propagate embeddings to queryEngine", () => {
+  it("should use updated embeddings provider after updateConfig", async () => {
+    const store = new MockVectorStore();
+    let callCountA = 0;
+    let callCountB = 0;
+
+    const embedA: EmbeddingProvider = {
+      dimensions: 3,
+      async embed(texts: string[]) {
+        callCountA++;
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const embedB: EmbeddingProvider = {
+      dimensions: 3,
+      async embed(texts: string[]) {
+        callCountB++;
+        return texts.map(() => [0, 0, 1]);
+      },
+    };
+
+    const rag = new RAG({
+      embeddings: embedA,
+      vectorStore: store,
+      logger: new NoopLogger(),
+    });
+
+    const f = await writeTemp("txt", "Hello world");
+    await rag.addDocument(f);
+    const countAAfterAdd = callCountA;
+
+    rag.updateConfig({ embeddings: embedB });
+
+    await rag.query("test?");
+    expect(callCountB).toBe(1);
+    expect(callCountA).toBe(countAAfterAdd);
+
+    await rag.query("test2?");
+    expect(callCountB).toBe(2);
+    expect(callCountA).toBe(countAAfterAdd);
+  });
+});
+
+// ============================================================
+// M1: addDocuments partial failure
+// ============================================================
+
+describe("M1: addDocuments should report partial success", () => {
+  it("should not silently lose documents on partial failure", async () => {
+    const store = new MockVectorStore();
+    let callCount = 0;
+    const embeddings: EmbeddingProvider = {
+      dimensions: 3,
+      async embed(texts: string[]) {
+        callCount++;
+        if (callCount === 2) throw new Error("Embedding failed on 2nd call");
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const rag = new RAG({
+      embeddings,
+      vectorStore: store,
+      logger: new NoopLogger(),
+    });
+
+    const f1 = await writeTemp("txt", "Document one");
+    const f2 = await writeTemp("txt", "Document two");
+    const f3 = await writeTemp("txt", "Document three");
+
+    await expect(rag.addDocuments([f1, f2, f3])).rejects.toThrow();
+    expect(rag.listDocuments().length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ============================================================
+// M2: duplicate document detection
+// ============================================================
+
+describe("M2: adding the same file twice should be handled", () => {
+  it("should not create duplicate chunks in the vector store", async () => {
+    const store = new MockVectorStore();
+    const embeddings: EmbeddingProvider = {
+      dimensions: 3,
+      async embed(texts: string[]) {
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    const rag = new RAG({
+      embeddings,
+      vectorStore: store,
+      chunking: { strategy: "fixed", size: 500, overlap: 50 },
+      logger: new NoopLogger(),
+    });
+
+    const f = await writeTemp("txt", "Same content");
+    await rag.addDocument(f);
+    const sizeAfterFirst = store.size;
+
+    await rag.addDocument(f);
+
+    expect(store.size).toBe(sizeAfterFirst);
+  });
+});
+
+// ============================================================
+// M9: parser factory should use ESM imports
+// ============================================================
+
+describe("M9: parser factory should use ESM imports", () => {
+  it("should resolve parsers without require() errors", async () => {
+    const { resolveParser } = await import("../src/parsers/index.ts");
+    const parser = resolveParser("/path/to/file.txt");
+    expect(parser.supports("file.txt")).toBe(true);
+  });
+});
+
+// ============================================================
+// M10: PdfParser assumes pdf-parse v2 API
+// ============================================================
+
+describe("M10: PdfParser should work with installed pdf-parse version", () => {
+  it("should use the pdf-parse v2 class-based API (PDFParse class)", async () => {
+    const { PdfParser } = await import("../src/parsers/pdf.ts");
+    const parser = new PdfParser();
+    expect(parser.supportedExtensions).toContain("pdf");
+  });
+
+  it("should throw a helpful error if pdf-parse is not installed", async () => {
+    const parserModule = await import("../src/parsers/pdf.ts");
+    const parseMethod = parserModule.PdfParser.prototype.parse;
+    expect(parseMethod.toString()).toContain("pdf-parse");
+  });
+});

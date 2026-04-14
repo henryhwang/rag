@@ -20,12 +20,17 @@ import { QueryEngine } from '../query/index.ts';
 import { createDocumentInfo } from './utils.ts';
 import { NoopLogger, Logger as LoggerType } from '../logger/index.ts';
 import { RAGError } from '../errors/index.ts';
+import * as path from 'node:path';
 
 export class RAG {
   private readonly chunkOptions: ChunkOptions;
   private readonly logger: Logger;
   private readonly documents: Map<string, DocumentInfo> = new Map();
-  private readonly queryEngine: QueryEngine;
+  /** Track document ID -> chunk IDs for proper cleanup on removal. */
+  private readonly docChunks: Map<string, string[]> = new Map();
+  /** Track file paths to detect duplicates. */
+  private readonly filePaths: Set<string> = new Set();
+  private queryEngine: QueryEngine;
 
   constructor(private readonly config: RAGConfig) {
     this.chunkOptions = { ...DEFAULT_CHUNK_OPTIONS, ...config.chunking };
@@ -46,6 +51,19 @@ export class RAG {
     file: string | { path: string; content?: Buffer },
   ): Promise<DocumentInfo> {
     const pathStr = typeof file === 'string' ? file : file.path;
+
+    if (this.filePaths.has(pathStr)) {
+      this.logger.debug('Skipping duplicate document: %s', pathStr);
+      // Return the existing document
+      for (const [id, doc] of this.documents) {
+        // Match by pathStr or by fileName (for cases where path differs)
+        if (doc.fileName === pathStr) return doc;
+        // Also match by checking if the basename is the same
+        const base = path.basename(pathStr);
+        if (doc.fileName === base) return doc;
+      }
+    }
+
     this.logger.debug('Adding document: %s', pathStr);
 
     // Parse
@@ -59,8 +77,6 @@ export class RAG {
       parsed.metadata,
     );
 
-    this.documents.set(docInfo.id, docInfo);
-
     // Chunk
     const chunks = chunkText(parsed.content, docInfo.id, this.chunkOptions);
     this.logger.debug(
@@ -69,7 +85,7 @@ export class RAG {
       chunks.length,
     );
 
-    // Embed & store
+    // Embed & store — pass chunk IDs so they can be tracked
     const texts = chunks.map((c) => c.content);
     const embeddings = await this.config.embeddings.embed(texts);
     const metadatas = chunks.map((c) => ({
@@ -78,8 +94,14 @@ export class RAG {
       documentId: c.documentId,
       chunkIndex: c.index,
     }));
+    const chunkIds = chunks.map((c) => c.id);
 
-    await this.config.vectorStore.add(embeddings, metadatas);
+    await this.config.vectorStore.add(embeddings, metadatas, chunkIds);
+
+    // Track only after successful ingest
+    this.documents.set(docInfo.id, docInfo);
+    this.docChunks.set(docInfo.id, chunkIds);
+    this.filePaths.add(pathStr);
 
     return docInfo;
   }
@@ -99,15 +121,20 @@ export class RAG {
 
   /**
    * Remove a document and its chunks from the vector store.
-   * Note: InMemoryVectorStore doesn't support bulk delete by documentId
-   * natively, so this is a no-op for the store in Phase 1.
    */
   async removeDocument(id: string): Promise<void> {
     if (!this.documents.has(id)) {
       throw new RAGError(`Document not found: ${id}`);
     }
+    const chunkIds = this.docChunks.get(id) ?? [];
+    if (chunkIds.length > 0) {
+      await this.config.vectorStore.delete(chunkIds);
+    }
+    const doc = this.documents.get(id);
+    if (doc?.fileName) this.filePaths.delete(doc.fileName);
     this.documents.delete(id);
-    this.logger.debug('Removed document: %s', id);
+    this.docChunks.delete(id);
+    this.logger.debug('Removed document: %s (%d chunks)', id, chunkIds.length);
   }
 
   /**
@@ -145,13 +172,27 @@ export class RAG {
   // -- Configuration --------------------------------------------------
 
   updateConfig(partial: Partial<RAGConfig>): void {
-    Object.assign(this.config, partial);
+    if (partial.embeddings !== undefined) {
+      this.config.embeddings = partial.embeddings;
+    }
+    if (partial.vectorStore !== undefined) {
+      this.config.vectorStore = partial.vectorStore;
+    }
     if (partial.chunking) {
       Object.assign(this.chunkOptions, partial.chunking);
     }
-    if (partial.logger) {
-      // Note: queryEngine already holds a reference;
-      // logger update affects future operations only.
+    if (partial.logger !== undefined) {
+      this.config.logger = partial.logger;
+      // Note: queryEngine already holds a reference to the old logger;
+      // this affects future operations on the RAG class only.
+    }
+    // Rebuild queryEngine if embeddings or vectorStore changed
+    if (partial.embeddings !== undefined || partial.vectorStore !== undefined) {
+      this.queryEngine = new QueryEngine({
+        embeddings: this.config.embeddings,
+        vectorStore: this.config.vectorStore,
+        logger: this.config.logger ?? new NoopLogger(),
+      });
     }
   }
 }

@@ -38,7 +38,13 @@ export class QueryEngine {
     const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
 
     this.logger.debug('Embedding query: %s', question);
-    const [embedding] = await this.embeddings.embed([question]);
+    const embeddings = await this.embeddings.embed([question]);
+    const embedding = embeddings[0];
+
+    if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+      this.logger.warn('Embedding provider returned empty result for: %s', question);
+      return { question, context: [] };
+    }
 
     this.logger.debug(
       'Searching vector store (topK=%d, threshold=%d)',

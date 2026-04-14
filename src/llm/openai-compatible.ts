@@ -68,7 +68,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
     };
 
     const content = json.choices[0]?.message?.content;
-    if (!content) {
+    if (content == null) {
       throw new LLMError('LLM API returned an empty response');
     }
     return content;

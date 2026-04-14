@@ -135,8 +135,8 @@ describe("resolveParser", () => {
   });
 
   it("should throw ParseError for unsupported extensions", () => {
-    expect(() => resolveParser("/path/to/file.pdf")).toThrow(ParseError);
-    expect(() => resolveParser("/path/to/file.docx")).toThrow(ParseError);
+    expect(() => resolveParser("/path/to/file.xyz")).toThrow(ParseError);
+    expect(() => resolveParser("/path/to/file.doc")).toThrow(ParseError);
   });
 });
 
@@ -151,5 +151,22 @@ describe("parseFile", () => {
 
   it("should throw for unsupported extensions", async () => {
     await expect(parseFile("/path/to/file.xyz")).rejects.toThrow(ParseError);
+  });
+});
+
+// ============================================================
+// H4: FileInput Buffer gives confusing error
+// ============================================================
+
+describe("H4: parseFile with bare Buffer should give clear error", () => {
+  it("should not say 'No parser available' for bare Buffer input", async () => {
+    await expect(parseFile(Buffer.from("hello"))).rejects.toThrow(ParseError);
+
+    try {
+      await parseFile(Buffer.from("hello"));
+    } catch (err: unknown) {
+      const msg = (err as Error).message.toLowerCase();
+      expect(msg).not.toContain("no parser available");
+    }
   });
 });

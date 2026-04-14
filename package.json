@@ -24,6 +24,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
     "uuid": "^10.0.0"
   },
   "devDependencies": {

@@ -163,3 +163,98 @@ describe("InMemoryVectorStore — persistence", () => {
     expect(results[0].content).toBe("persisted");
   });
 });
+
+// ============================================================
+// M11: InMemoryVectorStore.load() validation
+// ============================================================
+
+describe("M11: InMemoryVectorStore.load() should validate data", () => {
+  it("should throw on corrupt JSON", async () => {
+    const store = new InMemoryVectorStore();
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rag-m11-"));
+    const corruptFile = path.join(tmpDir, "corrupt.json");
+    await fs.writeFile(corruptFile, "not valid json{{{", "utf-8");
+
+    await expect(store.load(corruptFile)).rejects.toThrow();
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("should validate embedding dimensions on load", async () => {
+    const store = new InMemoryVectorStore();
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rag-m11b-"));
+    const badFile = path.join(tmpDir, "bad.json");
+
+    await fs.writeFile(
+      badFile,
+      JSON.stringify([
+        { id: "a", embedding: [1, 0, 0], metadata: { content: "x" } },
+        { id: "b", embedding: [1, 0, 0, 0, 0], metadata: { content: "y" } },
+      ]),
+      "utf-8"
+    );
+
+    await expect(store.load(badFile)).rejects.toThrow(VectorStoreError);
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+});
+
+// ============================================================
+// M12: undefined metadata breaks JSON serialization
+// ============================================================
+
+describe("M12: undefined metadata is lost on save/load", () => {
+  it("should demonstrate undefined metadata is lost on save/load", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0, 0]], [{ content: "test", lost: undefined }], ["id-1"]);
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rag-m12-"));
+    const saveFile = path.join(tmpDir, "store.json");
+
+    await store.save(saveFile);
+    const raw = await fs.readFile(saveFile, "utf-8");
+    const parsed = JSON.parse(raw);
+
+    expect(parsed[0].lost).toBeUndefined();
+
+    const store2 = new InMemoryVectorStore();
+    await store2.load(saveFile);
+    const results = await store2.search([1, 0, 0], 10);
+    expect(results[0].metadata).not.toHaveProperty("lost");
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+});
+
+// ============================================================
+// L5: embedding dimension validation at ingest time
+// ============================================================
+
+describe("L5: InMemoryVectorStore.add should validate embedding dimensions", () => {
+  it("should reject embeddings with inconsistent dimensions", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0, 0]], [{ content: "3d" }], ["id-1"]);
+
+    await expect(
+      store.add([[1, 0, 0, 0, 0]], [{ content: "5d" }], ["id-2"])
+    ).rejects.toThrow(VectorStoreError);
+  });
+});
+
+// ============================================================
+// L7: no duplicate ID check in InMemoryVectorStore.add
+// ============================================================
+
+describe("L7: InMemoryVectorStore.add should handle duplicate IDs", () => {
+  it("should create multiple records when same ID is added twice", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0, 0]], [{ content: "first" }], ["dup-id"]);
+    await store.add([[0, 1, 0]], [{ content: "second" }], ["dup-id"]);
+
+    // Two records with the same ID exist — delete removes both
+    expect(store.size).toBe(2);
+    await store.delete(["dup-id"]);
+    expect(store.size).toBe(0);
+  });
+});

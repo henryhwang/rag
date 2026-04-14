@@ -27,6 +27,28 @@ export class InMemoryVectorStore implements VectorStore {
       );
     }
 
+    // L5: Validate consistent dimensions across all new embeddings
+    let newDim: number | undefined;
+    for (const emb of embeddings) {
+      if (newDim === undefined) {
+        newDim = emb.length;
+      } else if (emb.length !== newDim) {
+        throw new VectorStoreError(
+          `Inconsistent embedding dimensions: ${emb.length} vs expected ${newDim}`,
+        );
+      }
+    }
+
+    // Validate against existing records
+    if (newDim !== undefined && this.records.length > 0) {
+      const existingDim = this.records[0].embedding.length;
+      if (newDim !== existingDim) {
+        throw new VectorStoreError(
+          `Embedding dimension mismatch: new ${newDim} vs existing ${existingDim}`,
+        );
+      }
+    }
+
     for (let i = 0; i < embeddings.length; i++) {
       const id = ids?.[i] ?? crypto.randomUUID();
       this.records.push({
@@ -76,7 +98,44 @@ export class InMemoryVectorStore implements VectorStore {
 
   async load(filePath: string): Promise<void> {
     const data = await fs.readFile(filePath, 'utf-8');
-    this.records = JSON.parse(data) as StoredRecord[];
+    const parsed: unknown = JSON.parse(data);
+
+    if (!Array.isArray(parsed)) {
+      throw new VectorStoreError('Corrupt store: expected an array');
+    }
+
+    // Validate each record and detect the first record's embedding dimension
+    let expectedDim: number | undefined;
+    const records: StoredRecord[] = [];
+
+    for (let i = 0; i < parsed.length; i++) {
+      const item = parsed[i] as Record<string, unknown>;
+      if (!item || typeof item !== 'object' || !('id' in item) || !('embedding' in item)) {
+        throw new VectorStoreError(
+          `Corrupt store: record ${i} is missing required fields`,
+        );
+      }
+      const embedding = item.embedding as number[];
+      if (!Array.isArray(embedding)) {
+        throw new VectorStoreError(
+          `Corrupt store: record ${i} has non-array embedding`,
+        );
+      }
+      if (expectedDim === undefined) {
+        expectedDim = embedding.length;
+      } else if (embedding.length !== expectedDim) {
+        throw new VectorStoreError(
+          `Corrupt store: record ${i} has dimension ${embedding.length}, expected ${expectedDim}`,
+        );
+      }
+      records.push({
+        id: item.id as string,
+        embedding,
+        metadata: (item.metadata as Metadata) ?? {},
+      });
+    }
+
+    this.records = records;
   }
 
   /** For introspection / testing. */

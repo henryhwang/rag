@@ -51,6 +51,8 @@ export {
   parseFile,
   TextParser,
   MarkdownParser,
+  DocxParser,
+  PdfParser,
   BaseDocumentParser,
 } from './parsers/index.ts';
 
