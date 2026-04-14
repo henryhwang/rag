@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { RAG } from "../src/core/RAG.ts";
+import { BM25Index } from "../src/search/bm25.ts";
 import { RAGError } from "../src/errors/index.ts";
 import type {
   EmbeddingProvider,
@@ -384,5 +385,164 @@ describe("M10: PdfParser should work with installed pdf-parse version", () => {
     const parserModule = await import("../src/parsers/pdf.ts");
     const parseMethod = parserModule.PdfParser.prototype.parse;
     expect(parseMethod.toString()).toContain("pdf-parse");
+  });
+});
+
+// ============================================================
+// Phase 3: BM25 integration in RAG class
+// ============================================================
+
+describe("Phase 3: BM25 integration", () => {
+  it("should auto-index documents in BM25 when configured", async () => {
+    const bm25 = new BM25Index();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { bm25 });
+
+    const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
+    await rag.addDocument(filePath);
+
+    expect(bm25.size).toBeGreaterThan(0);
+  });
+
+  it("should remove documents from BM25 on removeDocument", async () => {
+    const bm25 = new BM25Index();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { bm25 });
+
+    const filePath = await writeTemp("txt", "Hello world test content");
+    const doc = await rag.addDocument(filePath);
+    const sizeBefore = bm25.size;
+    expect(sizeBefore).toBeGreaterThan(0);
+
+    await rag.removeDocument(doc.id);
+    expect(bm25.size).toBeLessThan(sizeBefore);
+  });
+
+  it("should work without BM25 (backward compatible)", async () => {
+    const { rag } = makeRag();
+
+    const filePath = await writeTemp("txt", "Hello world");
+    await rag.addDocument(filePath);
+
+    expect(rag.listDocuments().length).toBe(1);
+  });
+});
+
+// ============================================================
+// Phase 3: End-to-end RAG flow with sparse/hybrid/rerank/rewrite
+// ============================================================
+
+describe("Phase 3: RAG end-to-end flow", () => {
+  it("should query with sparse mode through RAG API", async () => {
+    const bm25 = new BM25Index();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { bm25 });
+
+    const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
+    await rag.addDocument(filePath);
+
+    const result = await rag.query("TypeScript programming", { searchMode: "sparse" });
+    expect(result.searchMode).toBe("sparse");
+    expect(result.context.length).toBeGreaterThan(0);
+  });
+
+  it("should query with hybrid mode through RAG API", async () => {
+    const bm25 = new BM25Index();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { bm25 });
+
+    const filePath = await writeTemp("txt", "TypeScript is a typed programming language for web development");
+    await rag.addDocument(filePath);
+
+    const result = await rag.query("TypeScript", { searchMode: "hybrid" });
+    expect(result.searchMode).toBe("hybrid");
+    expect(result.context.length).toBeGreaterThan(0);
+  });
+
+  it("should apply reranker through RAG API", async () => {
+    const mockReranker = {
+      name: "MockReranker",
+      async rerank(_query: string, documents: string[]): Promise<number[]> {
+        return documents.map((d) => (d.includes("TypeScript") ? 0.9 : 0.1));
+      },
+    };
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { reranker: mockReranker as any });
+
+    const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
+    await rag.addDocument(filePath);
+
+    const result = await rag.query("TypeScript", { rerank: true });
+    expect(result.context.length).toBeGreaterThan(0);
+  });
+
+  it("should apply query rewriter through RAG API", async () => {
+    const mockRewriter = {
+      name: "MockRewriter",
+      async rewrite(query: string): Promise<string[]> {
+        return [query, query.toLowerCase()];
+      },
+    };
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: new MockVectorStore(),
+      logger: new NoopLogger(),
+    }, { queryRewriter: mockRewriter as any });
+
+    const filePath = await writeTemp("txt", "TypeScript programming");
+    await rag.addDocument(filePath);
+
+    const result = await rag.query("TypeScript", { rewriteQuery: true });
+    expect(result.context.length).toBeGreaterThan(0);
+  });
+
+  it("should use all Phase 3 features together", async () => {
+    const bm25 = new BM25Index();
+    const mockReranker = {
+      name: "MockReranker",
+      async rerank(_query: string, documents: string[]): Promise<number[]> {
+        return documents.map(() => 0.5);
+      },
+    };
+    const mockRewriter = {
+      name: "MockRewriter",
+      async rewrite(query: string): Promise<string[]> {
+        return [query];
+      },
+    };
+    const rag = new RAG(
+      {
+        embeddings: new MockEmbeddings(),
+        vectorStore: new MockVectorStore(),
+        logger: new NoopLogger(),
+      },
+      { bm25, reranker: mockReranker as any, queryRewriter: mockRewriter as any },
+    );
+
+    const filePath = await writeTemp("txt", "Advanced TypeScript patterns for web development");
+    await rag.addDocument(filePath);
+
+    const result = await rag.query("TypeScript", {
+      searchMode: "hybrid",
+      rerank: true,
+      rewriteQuery: true,
+    });
+    expect(result.searchMode).toBe("hybrid");
+    expect(result.context.length).toBeGreaterThan(0);
   });
 });

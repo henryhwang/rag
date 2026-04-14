@@ -53,3 +53,17 @@ export class QueryError extends RAGError {
     this.name = 'QueryError';
   }
 }
+
+export class SearchError extends RAGError {
+  constructor(message: string, options?: { cause?: Error }) {
+    super(message, options);
+    this.name = 'SearchError';
+  }
+}
+
+export class RerankError extends RAGError {
+  constructor(message: string, options?: { cause?: Error }) {
+    super(message, options);
+    this.name = 'RerankError';
+  }
+}

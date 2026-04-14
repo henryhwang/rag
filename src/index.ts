@@ -40,6 +40,8 @@ export {
   VectorStoreError,
   LLMError,
   QueryError,
+  SearchError,
+  RerankError,
 } from './errors/index.ts';
 
 // Logger
@@ -67,6 +69,10 @@ export type { OpenAICompatibleEmbeddingsConfig } from './embeddings/index.ts';
 
 // Storage
 export { InMemoryVectorStore } from './storage/index.ts';
+export {
+  SQLiteVectorStore,
+  type SQLiteVectorStoreConfig,
+} from './storage/index.ts';
 
 // LLM
 export { OpenAICompatibleLLM } from './llm/index.ts';
@@ -77,3 +83,33 @@ export { QueryEngine } from './query/index.ts';
 
 // Utils
 export { generateDocId, createDocumentInfo } from './core/utils.ts';
+
+// Phase 3: Search
+export {
+  BM25Index,
+  fuseResults,
+  reciprocalRankFusion,
+  syncBM25WithStore,
+  type BM25Document,
+  type BM25SearchResult,
+  type BM25Config,
+  type HybridSearchConfig,
+  DEFAULT_BM25_CONFIG,
+  DEFAULT_HYBRID_CONFIG,
+} from './search/index.ts';
+
+// Phase 3: Reranker
+export {
+  OpenAICompatibleReranker,
+  type OpenAICompatibleRerankerConfig,
+} from './reranking/index.ts';
+
+// Phase 3: Query Rewrite
+export {
+  LLMQueryRewriter,
+  SimpleQueryRewriter,
+  type LLMQueryRewriterConfig,
+} from './query/rewrite/index.ts';
+
+// Phase 3: RAG Phase 3 config
+export { type RAGPhase3Config } from './core/RAG.ts';

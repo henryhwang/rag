@@ -180,7 +180,7 @@ Short line two.
 Short line three.
 Short line four which pushes past the limit.`;
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 40,
       overlap: 8,
     });
@@ -198,25 +198,23 @@ Short line four which pushes past the limit.`;
 });
 
 // ============================================================
-// H3: 'semantic' strategy name is misleading
+// H3: 'markdown' strategy name
 // ============================================================
 
-describe("H3: 'semantic' strategy should be renamed to 'markdown'", () => {
-  it("should apply markdown-aware chunking for 'semantic' strategy", async () => {
+describe("H3: 'markdown' strategy name", () => {
+  it("should apply markdown-aware chunking for 'markdown' strategy", async () => {
     const content = "This is plain text. It has no headings or code blocks. Just sentences.";
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 50,
       overlap: 5,
     });
-    // The 'semantic' name implies embedding/topic-based splitting but
-    // actually does markdown-aware splitting.
     expect(chunks.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("should not accept 'markdown' as a strategy yet (reserved name)", () => {
+  it("should reject the old 'semantic' name as unknown", () => {
     expect(() =>
-      chunkText("hello", "doc-1", { strategy: "markdown" as any, size: 100, overlap: 10 })
+      chunkText("hello", "doc-1", { strategy: "semantic" as any, size: 100, overlap: 10 })
     ).toThrow(ChunkingError);
   });
 });
@@ -277,7 +275,7 @@ describe("L8: markdown chunking should handle nested code fences", () => {
     ].join("\n");
 
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 200,
       overlap: 0,
     });
@@ -297,7 +295,7 @@ describe("L9: markdown chunking heading context can exceed size", () => {
     const content = [`# Heading`, "", longLine, longLine].join("\n");
 
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 60,
       overlap: 0,
     });
@@ -379,7 +377,7 @@ Content under heading one goes here with some words.
 
 More content under heading two.`;
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 60,
       overlap: 0,
     });
@@ -403,7 +401,7 @@ function hello() {
 
 After the code.`;
     const chunks = chunkText(codeContent, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 50,
       overlap: 0,
     });
@@ -420,7 +418,7 @@ After the code.`;
 A lot of text here that will exceed the size limit for a single chunk.
 More lines to push it over the boundary.`;
     const chunks = chunkText(content, "doc-1", {
-      strategy: "semantic",
+      strategy: "markdown",
       size: 50,
       overlap: 0,
     });
@@ -432,10 +430,10 @@ More lines to push it over the boundary.`;
 
   it("should throw on invalid size/overlap", () => {
     expect(() =>
-      chunkText("test", "doc-1", { strategy: "semantic", size: -1, overlap: 0 })
+      chunkText("test", "doc-1", { strategy: "markdown", size: -1, overlap: 0 })
     ).toThrow(ChunkingError);
     expect(() =>
-      chunkText("test", "doc-1", { strategy: "semantic", size: 10, overlap: 15 })
+      chunkText("test", "doc-1", { strategy: "markdown", size: 10, overlap: 15 })
     ).toThrow(ChunkingError);
   });
 });

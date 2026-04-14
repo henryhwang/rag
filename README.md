@@ -6,7 +6,7 @@ A modular TypeScript library for managing **Retrieval-Augmented Generation (RAG)
 
 - **Pluggable architecture** — swap embedding models, LLM providers, and vector stores independently
 - **Multi-format document parsing** — `.txt`, `.md`, `.docx`, `.pdf` with lazy-loaded optional parsers
-- **Flexible chunking** — fixed-size, recursive (paragraphs → sentences), and markdown-aware (headings, code blocks)
+- **Flexible chunking** — fixed-size, recursive (paragraphs → sentences), and markdown (headings, code blocks)
 - **OpenAI-compatible API support** — works with OpenAI, Ollama, vLLM, LiteLLM, and any compatible endpoint
 - **Zero-setup defaults** — in-memory vector store with cosine similarity and JSON persistence
 - **Fully typed** — end-to-end TypeScript with declaration files and strict mode
@@ -26,11 +26,7 @@ npm install mammoth         # .docx parsing (optional)
 npm install pdf-parse       # .pdf parsing (optional)
 ```
 
-Additional optional peer dependencies:
-
-```bash
-npm install openai          # required for embedding & LLM providers
-```
+The library uses native `fetch()` for all API calls — no SDK required.
 
 ## Quick Start
 
@@ -123,7 +119,7 @@ Main entry point combining all modules.
 
 ```typescript
 interface ChunkOptions {
-  strategy: 'fixed' | 'recursive' | 'semantic';
+  strategy: 'fixed' | 'recursive' | 'markdown';
   size: number;
   overlap: number;
   maxTokens?: number;
@@ -140,16 +136,31 @@ chunking: { strategy: 'fixed', size: 500, overlap: 50 }
 chunking: { strategy: 'recursive', size: 500, overlap: 50 }
 
 // Markdown-aware: preserve headings, never split code blocks
-chunking: { strategy: 'semantic', size: 500, overlap: 50 }
+chunking: { strategy: 'markdown', size: 500, overlap: 50 }
 ```
 
 ### Search Options
 
 ```typescript
 interface SearchOptions {
-  topK: number;
-  scoreThreshold: number;
+  topK?: number;
+  scoreThreshold?: number;
   filter?: Filter;
+  /** 'dense' (vector), 'sparse' (BM25), or 'hybrid' (combined). Default: 'dense'. */
+  searchMode?: 'dense' | 'sparse' | 'hybrid';
+  /** Weight for dense results in hybrid mode (0–1). Default: 0.5. */
+  denseWeight?: number;
+}
+```
+
+```typescript
+interface QueryOptions extends SearchOptions {
+  llm?: LLMProvider;
+  systemPrompt?: string;
+  /** Apply reranker after search. Requires a configured reranker. */
+  rerank?: boolean;
+  /** Expand query for better recall. Requires a configured query rewriter. */
+  rewriteQuery?: boolean;
 }
 ```
 
@@ -184,7 +195,7 @@ interface SearchOptions {
 src/
 ├── index.ts                  # Public API exports
 ├── core/
-│   ├── RAG.ts                # Main RAG class
+│   ├── RAG.ts                # Main RAG class (with Phase 3 support)
 │   └── utils.ts              # Common utilities
 ├── parsers/
 │   ├── index.ts              # Parser factory (lazy-loads optional parsers)
@@ -201,24 +212,54 @@ src/
 │   └── openai-compatible.ts  # OpenAI-compatible provider
 ├── storage/
 │   ├── index.ts
-│   └── in-memory.ts          # In-memory vector store
+│   ├── in-memory.ts          # In-memory vector store
+│   └── sqlite.ts             # SQLite vector store (via @libsql/client)
 ├── llm/
 │   ├── index.ts
 │   └── openai-compatible.ts  # OpenAI-compatible LLM provider
+├── search/
+│   ├── index.ts
+│   ├── bm25.ts               # BM25 sparse keyword search
+│   └── hybrid.ts             # Score fusion + Reciprocal Rank Fusion
+├── reranking/
+│   ├── index.ts
+│   └── openai-compatible.ts  # LLM-based reranker
 ├── query/
 │   ├── index.ts
-│   └── engine.ts             # Query engine
-├── examples/
-│   └── basic.ts                  # Runnable end-to-end demo
-├── tests/
-│   ├── errors.test.ts
-│   ├── chunking.test.ts
-│   ├── parsers.test.ts
-│   └── ...                       # 89 tests total
-├── package.json
-├── tsconfig.json
-├── README.md
-└── LICENSE
+│   ├── engine.ts             # Query engine (dense/sparse/hybrid + rerank/rewrite)
+│   └── rewrite/
+│       ├── index.ts
+│       ├── simple-rewriter.ts    # Rule-based query expansion
+│       └── llm-rewriter.ts       # LLM-powered query expansion
+├── types/
+│   └── index.ts              # Shared type definitions
+├── errors/
+│   └── index.ts              # Custom error hierarchy
+├── logger/
+│   └── index.ts              # Logger interface + NoopLogger
+└── index.ts
+examples/
+├── basic.ts                  # Simple end-to-end demo
+└── phase3-advanced.ts        # Phase 3 features demo
+tests/                        # 255 tests across 18 files
+├── bm25.test.ts
+├── chunking.test.ts
+├── embeddings.test.ts
+├── engine.test.ts
+├── errors.test.ts
+├── hybrid.test.ts
+├── integration.test.ts
+├── llm.test.ts
+├── logger.test.ts
+├── parsers.test.ts
+├── parsers-docx.test.ts
+├── parsers-pdf.test.ts
+├── query.test.ts
+├── rag.test.ts
+├── reranker.test.ts
+├── rewriter.test.ts
+├── sqlite-store.test.ts
+└── storage.test.ts
 ```
 
 ## Development
@@ -234,7 +275,7 @@ npm run test:watch  # Watch mode
 
 ## Test Coverage
 
-The project ships with **139 tests** across 12 test files:
+The project ships with **255 tests** across 18 test files:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -242,11 +283,16 @@ The project ships with **139 tests** across 12 test files:
 | Logger | 3 | NoopLogger, custom implementations |
 | Chunking | 21 | Fixed, recursive, and markdown-aware strategies; overlap behavior |
 | Parsers | 17 | TextParser, MarkdownParser, DocxParser, PdfParser, factory |
-| Storage | 16 | CRUD, cosine search, filtering, persistence, validation |
-| Embeddings | 9 | Config, mocked API calls, error handling, dimensions, response validation |
-| LLM | 11 | Generate, streaming, error handling, empty responses |
-| Query Engine | 12 | Retrieval, threshold filtering, answer generation, injection safety |
-| RAG Core | 18 | Document management, query, config updates, duplicate detection, cleanup |
+| Storage (InMemory) | 16 | CRUD, cosine search, filtering, persistence, validation |
+| Storage (SQLite) | 18 | Add, search, delete, persistence, corruption handling |
+| BM25 Search | 23 | Construction, add/remove, search, scoring properties |
+| Hybrid Fusion | 16 | Score normalization, RRF, edge cases, weight tuning |
+| Query Engine | 21 | Dense/sparse/hybrid search, reranking, query rewriting |
+| Embeddings | 9 | Config, mocked API calls, error handling |
+| LLM | 11 | Generate, streaming, error handling |
+| Reranker | 13 | Score parsing, normalization, API errors, batching |
+| Query Rewriters | 18 | Simple rewriter (variants), LLM rewriter (dedup, stripping) |
+| RAG Core | 18 | Document management, query, config updates, Phase 3 integration |
 | Integration | 6 | Full addDocument → query flow with real store |
 
 API providers use **mocked `fetch`** — no network calls during tests.
@@ -255,16 +301,17 @@ API providers use **mocked `fetch`** — no network calls during tests.
 
 - **Metadata filtering:** Exact-match only; no range queries, operators, or regex support.
 - **Logger:** Only `NoopLogger` is provided; no console or file logger implementation yet.
-- **DOCX parsing:** Requires `mammoth` peer dependency — installed automatically via `bun add mammoth`.
-- **PDF parsing:** Requires `pdf-parse` peer dependency — installed automatically via `bun add pdf-parse`.
+- **DOCX parsing:** Requires `mammoth` peer dependency.
+- **PDF parsing:** Requires `pdf-parse` peer dependency.
+- **SQLite vector store:** Uses `@libsql/client` (pure TS, works in Bun and Node.js).
 
 ## Roadmap
 
 | Phase | Status | Highlights |
 |-------|--------|------------|
 | **Phase 1: MVP** | ✅ Complete | Text/MD parsers, fixed chunking, OpenAI-compatible providers, in-memory store |
-| **Phase 2: Extended Formats** | ✅ Complete | DOCX/PDF parsers, recursive & markdown-aware chunking, 139 tests |
-| **Phase 3: Advanced Storage** | Planned | SQLite, ChromaDB, Qdrant backends; hybrid search; reranking |
+| **Phase 2: Extended Formats** | ✅ Complete | DOCX/PDF parsers, recursive & markdown-aware chunking |
+| **Phase 3: Advanced Storage & Search** | ✅ Complete | SQLite store (libsql), BM25, hybrid search, reranking, query rewriting |
 | **Phase 4: Polish** | Planned | CLI tool, performance optimizations |
 
 ## License

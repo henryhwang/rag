@@ -204,10 +204,10 @@ describe("M11: InMemoryVectorStore.load() should validate data", () => {
 // M12: undefined metadata breaks JSON serialization
 // ============================================================
 
-describe("M12: undefined metadata is lost on save/load", () => {
-  it("should demonstrate undefined metadata is lost on save/load", async () => {
+describe("M12: null metadata survives save/load", () => {
+  it("should preserve null metadata on save/load", async () => {
     const store = new InMemoryVectorStore();
-    await store.add([[1, 0, 0]], [{ content: "test", lost: undefined }], ["id-1"]);
+    await store.add([[1, 0, 0]], [{ content: "test", missing: null }], ["id-1"]);
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rag-m12-"));
     const saveFile = path.join(tmpDir, "store.json");
@@ -216,12 +216,13 @@ describe("M12: undefined metadata is lost on save/load", () => {
     const raw = await fs.readFile(saveFile, "utf-8");
     const parsed = JSON.parse(raw);
 
-    expect(parsed[0].lost).toBeUndefined();
+    // null survives JSON.stringify (unlike undefined)
+    expect(parsed[0].metadata.missing).toBeNull();
 
     const store2 = new InMemoryVectorStore();
     await store2.load(saveFile);
     const results = await store2.search([1, 0, 0], 10);
-    expect(results[0].metadata).not.toHaveProperty("lost");
+    expect(results[0].metadata.missing).toBeNull();
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

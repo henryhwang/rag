@@ -12,15 +12,27 @@ import {
   SearchResult,
   Logger,
   LLMProvider,
+  Reranker,
+  QueryRewriter,
 } from '../types/index.ts';
 import { DEFAULT_CHUNK_OPTIONS, DEFAULT_SEARCH_OPTIONS } from '../types/index.ts';
 import { parseFile, resolveParser } from '../parsers/index.ts';
 import { chunkText } from '../chunking/index.ts';
-import { QueryEngine } from '../query/index.ts';
+import { QueryEngine, QueryEngineConfig } from '../query/index.ts';
 import { createDocumentInfo } from './utils.ts';
 import { NoopLogger, Logger as LoggerType } from '../logger/index.ts';
 import { RAGError } from '../errors/index.ts';
+import { BM25Index } from '../search/index.ts';
 import * as path from 'node:path';
+
+export interface RAGPhase3Config {
+  /** Optional BM25 index for sparse/hybrid search. */
+  bm25?: BM25Index;
+  /** Optional reranker for post-search ranking. */
+  reranker?: Reranker;
+  /** Optional query rewriter for pre-search expansion. */
+  queryRewriter?: QueryRewriter;
+}
 
 export class RAG {
   private readonly chunkOptions: ChunkOptions;
@@ -30,16 +42,15 @@ export class RAG {
   private readonly docChunks: Map<string, string[]> = new Map();
   /** Track file paths to detect duplicates. */
   private readonly filePaths: Set<string> = new Set();
+  /** BM25 index for hybrid/sparse search (Phase 3). */
+  private readonly bm25?: BM25Index;
   private queryEngine: QueryEngine;
 
-  constructor(private readonly config: RAGConfig) {
+  constructor(private readonly config: RAGConfig, phase3?: RAGPhase3Config) {
     this.chunkOptions = { ...DEFAULT_CHUNK_OPTIONS, ...config.chunking };
     this.logger = config.logger ?? new NoopLogger();
-    this.queryEngine = new QueryEngine({
-      embeddings: config.embeddings,
-      vectorStore: config.vectorStore,
-      logger: this.logger,
-    });
+    this.bm25 = phase3?.bm25;
+    this.queryEngine = this.createQueryEngine(phase3);
   }
 
   // -- Document management -------------------------------------------
@@ -98,6 +109,20 @@ export class RAG {
 
     await this.config.vectorStore.add(embeddings, metadatas, chunkIds);
 
+    // Also index for BM25 if available
+    if (this.bm25) {
+      const bm25Docs = chunks.map((c) => ({
+        id: c.id,
+        content: c.content,
+        metadata: {
+          ...c.metadata,
+          documentId: c.documentId,
+          chunkIndex: c.index,
+        },
+      }));
+      this.bm25.addDocuments(bm25Docs);
+    }
+
     // Track only after successful ingest
     this.documents.set(docInfo.id, docInfo);
     this.docChunks.set(docInfo.id, chunkIds);
@@ -120,7 +145,7 @@ export class RAG {
   }
 
   /**
-   * Remove a document and its chunks from the vector store.
+   * Remove a document and its chunks from the vector store and BM25 index.
    */
   async removeDocument(id: string): Promise<void> {
     if (!this.documents.has(id)) {
@@ -129,6 +154,8 @@ export class RAG {
     const chunkIds = this.docChunks.get(id) ?? [];
     if (chunkIds.length > 0) {
       await this.config.vectorStore.delete(chunkIds);
+      // Also remove from BM25
+      this.bm25?.removeDocuments(chunkIds);
     }
     const doc = this.documents.get(id);
     if (doc?.fileName) this.filePaths.delete(doc.fileName);
@@ -183,16 +210,24 @@ export class RAG {
     }
     if (partial.logger !== undefined) {
       this.config.logger = partial.logger;
-      // Note: queryEngine already holds a reference to the old logger;
-      // this affects future operations on the RAG class only.
     }
     // Rebuild queryEngine if embeddings or vectorStore changed
     if (partial.embeddings !== undefined || partial.vectorStore !== undefined) {
-      this.queryEngine = new QueryEngine({
-        embeddings: this.config.embeddings,
-        vectorStore: this.config.vectorStore,
-        logger: this.config.logger ?? new NoopLogger(),
-      });
+      this.queryEngine = this.createQueryEngine();
     }
+  }
+
+  // -- Private helpers ------------------------------------------------
+
+  private createQueryEngine(phase3?: RAGPhase3Config): QueryEngine {
+    const opts: QueryEngineConfig = {
+      embeddings: this.config.embeddings,
+      vectorStore: this.config.vectorStore,
+      logger: this.logger,
+      bm25: phase3?.bm25 ?? this.bm25,
+      reranker: phase3?.reranker,
+      queryRewriter: phase3?.queryRewriter,
+    };
+    return new QueryEngine(opts);
   }
 }

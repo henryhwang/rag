@@ -74,6 +74,51 @@ export class OpenAICompatibleLLM implements LLMProvider {
     return content;
   }
 
+  async generateMessages(
+    messages: { role: string; content: string }[],
+    options?: LLMOptions,
+  ): Promise<string> {
+    if (!this.apiKey) {
+      throw new LLMError(
+        'API key is required. Set it via config.apiKey or the OPENAI_API_KEY env var.',
+      );
+    }
+
+    const url = `${this.baseURL.replace(/\/+$/, '')}/chat/completions`;
+    const model = options?.model ?? this.model;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({ model, messages }),
+      });
+    } catch (err) {
+      throw new LLMError(`Network error calling LLM API: ${url}`, {
+        cause: err as Error,
+      });
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new LLMError(`LLM API error ${response.status}: ${body}`);
+    }
+
+    const json = (await response.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+
+    const content = json.choices[0]?.message?.content;
+    if (content == null) {
+      throw new LLMError('LLM API returned an empty response');
+    }
+    return content;
+  }
+
   async *stream(
     prompt: string,
     options?: LLMOptions,
@@ -142,7 +187,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
             const delta = json.choices?.[0]?.delta?.content;
             if (delta) yield delta;
           } catch {
-            // Skip malformed SSE chunks
+            // Skip malformed SSE chunks (e.g., error events, keep-alives)
           }
         }
       }

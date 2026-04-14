@@ -16,7 +16,7 @@ export function chunkText(
       return fixedSizeChunk(content, documentId, options.size, options.overlap);
     case 'recursive':
       return recursiveChunk(content, documentId, options.size, options.overlap);
-    case 'semantic':
+    case 'markdown':
       return markdownAwareChunk(content, documentId, options.size, options.overlap);
     default:
       throw new ChunkingError(`Unknown chunking strategy: "${options.strategy}"`);
