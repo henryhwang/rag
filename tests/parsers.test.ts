@@ -155,7 +155,7 @@ describe("parseFile", () => {
 });
 
 // ============================================================
-// H4: FileInput Buffer gives confusing error
+// H4: FileInput Buffer gives confusing error  
 // ============================================================
 
 describe("H4: parseFile with bare Buffer should give clear error", () => {
@@ -168,5 +168,171 @@ describe("H4: parseFile with bare Buffer should give clear error", () => {
       const msg = (err as Error).message.toLowerCase();
       expect(msg).not.toContain("no parser available");
     }
+  });
+});
+
+// ============================================================
+// BaseDocumentParser.resolveInput edge cases
+// ============================================================
+
+describe("BaseDocumentParser.resolveInput", () => {
+  it("should use pre-loaded buffer from { path, content } object", async () => {
+    const filePath = await writeTemp("txt", "Original file content");
+    const customContent = Buffer.from("My custom content");
+    
+    const parser = new TextParser();
+    const result = await parser.parse({ path: filePath, content: customContent });
+
+    // Should use custom content, not read from disk
+    expect(result.content).toBe("My custom content");
+  });
+
+  it("should handle { path } without content by reading file", async () => {
+    const filePath = await writeTemp("txt", "Read from file");
+    const parser = new TextParser();
+    const result = await parser.parse({ path: filePath });
+    expect(result.content).toBe("Read from file");
+  });
+
+  it("should throw ParseError when fs.readFile fails", async () => {
+    const parser = new TextParser();
+    await expect(parser.parse("/nonexistent/path/file.txt")).rejects.toThrow(ParseError);
+  });
+
+  it("should include error cause on read failures", async () => {
+    const parser = new TextParser();
+    try {
+      await parser.parse("/nonexistent/path/file.txt");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ParseError);
+      expect((err as Error & { cause?: Error }).cause).toBeDefined();
+    }
+  });
+});
+
+describe("BaseDocumentParser.supports", () => {
+  it(".txt support works correctly with case insensitivity", () => {
+    const parser = new TextParser();
+    expect(parser.supports("test.txt")).toBe(true);
+    expect(parser.supports("TEST.TXT")).toBe(true);
+  });
+});
+
+// ============================================================
+// DocxParser - explicit parse() and supports() coverage
+// ============================================================
+
+describe("DocxParser - function coverage", () => {
+  async function createDocxParser(): Promise<any> {
+    const mod = await import("../src/parsers/docx.ts");
+    return new mod.DocxParser();
+  }
+
+  it("parse method exists and is callable (will fail without valid docx)", async () => {
+    const docxParser = await createDocxParser();
+    // Ensure the parse() function itself is covered even though parse will fail
+    await expect(docxParser.parse("/missing.docx")).rejects.toThrow(ParseError);
+  });
+
+  it("supports method works for .docx", async () => {
+    const docxParser = await createDocxParser();
+    expect(docxParser.supports("file.docx")).toBe(true);
+    expect(docxParser.supports("FILE.DOCX")).toBe(true);
+    expect(docxParser.supports("file.txt")).toBe(false);
+  });
+});
+
+describe("PdfParser - function coverage", () => {
+  async function createPdfParser(): Promise<any> {
+    const mod = await import("../src/parsers/pdf.ts");
+    return new mod.PdfParser();
+  }
+
+  it("parse method exists and is callable (will fail without valid pdf)", async () => {
+    const pdfParser = await createPdfParser();
+    // Ensure the parse() function itself is covered even though parse will fail
+    await expect(pdfParser.parse("/missing.pdf")).rejects.toThrow(ParseError);
+  });
+
+  it("supports method works for .pdf", async () => {
+    const pdfParser = await createPdfParser();
+    expect(pdfParser.supports("file.pdf")).toBe(true);
+    expect(pdfParser.supports("FILE.PDF")).toBe(true);
+    expect(pdfParser.supports("file.txt")).toBe(false);
+  });
+});
+
+describe("MarkdownParser - explicit parse() and supports() coverage", () => {
+  it("parse method exists on MarkdownParser", async () => {
+    const filePath = await writeTemp("md", "# Test");
+    const parser = new MarkdownParser();
+    await expect(parser.parse(filePath)).resolves.toBeDefined();
+  });
+
+  it("supports method works for all markdown extensions", () => {
+    const parser = new MarkdownParser();
+    expect(parser.supports("file.md")).toBe(true);
+    expect(parser.supports("file.markdown")).toBe(true);
+    expect(parser.supports("FILE.MD")).toBe(true);
+  });
+});
+
+describe("TextParser - explicit parse() and supports() coverage", () => {
+  it("parse method exists on TextParser", async () => {
+    const filePath = await writeTemp("txt", "test");
+    const parser = new TextParser();
+    await expect(parser.parse(filePath)).resolves.toBeDefined();
+  });
+
+  it("supports method works for txt extension variations", () => {
+    const parser = new TextParser();
+    expect(parser.supports("file.txt")).toBe(true);
+    expect(parser.supports("FILE.TXT")).toBe(true);
+  });
+});
+
+// ============================================================
+// Strip front-matter helper - function coverage
+// ============================================================
+
+describe("stripFrontMatter - function coverage", async () => {
+  const { stripFrontMatter } = await import("../src/parsers/index.ts");
+
+  it("removes YAML frontmatter completely", () => {
+    const input = `---
+title: My Doc
+author: Jane
+---
+
+# Content`;
+    const output = stripFrontMatter(input);
+    // Front-matter regex leaves a leading newline after the --- block, then trimsStart is needed
+    expect(output.trim()).toBe("# Content");
+    expect(output).not.toContain("---");
+  });
+
+  it("leaves text without frontmatter unchanged", () => {
+    const input = "Just regular text";
+    expect(stripFrontMatter(input)).toBe(input);
+  });
+
+  it("handles Windows line endings in frontmatter", () => {
+    const input = "---\r\ntitle: Test\r\n---\r\nContent here";
+    const output = stripFrontMatter(input);
+    expect(output).toBe("Content here");
+  });
+
+  it("does not match when frontmatter has no content between dashes", () => {
+    // The regex requires at least minimal content or a newline between --- blocks
+    const input = "---\n---\nSome content";
+    const output = stripFrontMatter(input);
+    // Empty frontmatter is not stripped by the regex pattern
+    expect(output).toBe(input);
+  });
+
+  it("strips frontmatter with at least one line of metadata", () => {
+    const input = "---\ntitle: Only One Field\n---\nContent after";
+    const output = stripFrontMatter(input);
+    expect(output).toBe("Content after");
   });
 });

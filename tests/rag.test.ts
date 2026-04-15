@@ -295,6 +295,61 @@ describe("H2: updateConfig should propagate embeddings to queryEngine", () => {
     expect(callCountB).toBe(2);
     expect(callCountA).toBe(countAAfterAdd);
   });
+
+  it("H2(a): should not overwrite config when passing undefined in Partial", async () => {
+    const store = new MockVectorStore();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: store,
+      logger: new NoopLogger(),
+      chunking: { strategy: "fixed", size: 400, overlap: 40 },
+    });
+
+    const filePath = await writeTemp("txt", "Test document for chunking");
+    await rag.addDocument(filePath);
+
+    (rag as any).updateConfig({ chunking: undefined });
+
+    await rag.query("test query?");
+    
+    expect(rag.listDocuments().length).toBeGreaterThan(0);
+  });
+
+  it("H2(b): should update main logger but note queryEngine may need rebuild", async () => {
+    const loggedCalls: { method: string; args: unknown[] }[] = [];
+    
+    const customLogger = {
+      debug: (...args: unknown[]) => {
+        loggedCalls.push({ method: 'debug', args });
+      },
+      info: (...args: unknown[]) => {
+        loggedCalls.push({ method: 'info', args });
+      },
+      warn: (msg: string, ...args: unknown[]) => {
+        loggedCalls.push({ method: 'warn', args: [msg, ...args] });
+      },
+      error: (msg: string, ...args: unknown[]) => {
+        loggedCalls.push({ method: 'error', args: [msg, ...args] });
+      },
+    };
+
+    const store = new MockVectorStore();
+    const rag = new RAG({
+      embeddings: new MockEmbeddings(),
+      vectorStore: store,
+      logger: new NoopLogger(),
+    });
+
+    const f = await writeTemp("txt", "Test content");
+    await rag.addDocument(f);
+
+    (rag as any).updateConfig({ logger: customLogger });
+
+    await rag.addDocument(await writeTemp("txt", "another doc"));
+
+    expect((rag as any).config.logger).toBe(customLogger);
+    expect(loggedCalls.length).toBe(0);
+  });
 });
 
 // ============================================================

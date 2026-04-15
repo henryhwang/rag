@@ -199,9 +199,9 @@ src/
 │   └── utils.ts              # Common utilities
 ├── parsers/
 │   ├── index.ts              # Parser factory (lazy-loads optional parsers)
-│   ├── base.ts               # Abstract parser
+│   ├── base.ts               # Abstract parser with shared utilities
 │   ├── text.ts               # .txt parser
-│   ├── markdown.ts           # .md parser
+│   ├── markdown.ts           # .md parser (+ stripFrontMatter utility)
 │   ├── docx.ts               # .docx parser (mammoth, optional)
 │   └── pdf.ts                # .pdf parser (pdf-parse, optional)
 ├── chunking/
@@ -241,25 +241,27 @@ src/
 examples/
 ├── basic.ts                  # Simple end-to-end demo
 └── phase3-advanced.ts        # Phase 3 features demo
-tests/                        # 255 tests across 18 files
+tests/                        # 294 tests across 21 files
 ├── bm25.test.ts
 ├── chunking.test.ts
+├── core.test.ts
 ├── embeddings.test.ts
 ├── engine.test.ts
 ├── errors.test.ts
 ├── hybrid.test.ts
+├── index.test.ts
 ├── integration.test.ts
 ├── llm.test.ts
 ├── logger.test.ts
 ├── parsers.test.ts
-├── parsers-docx.test.ts
-├── parsers-pdf.test.ts
-├── query.test.ts
 ├── rag.test.ts
 ├── reranker.test.ts
 ├── rewriter.test.ts
+├── search.test.ts
+├── simple-rewriter.test.ts
 ├── sqlite-store.test.ts
-└── storage.test.ts
+├── storage.test.ts
+└── vector-store.test.ts
 ```
 
 ## Development
@@ -275,15 +277,15 @@ npm run test:watch  # Watch mode
 
 ## Test Coverage
 
-The project ships with **255 tests** across 18 test files:
+The project ships with **294 tests** across 21 test files:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
 | Errors | 10 | Hierarchy, cause propagation |
-| Logger | 3 | NoopLogger, custom implementations |
-| Chunking | 21 | Fixed, recursive, and markdown-aware strategies; overlap behavior |
-| Parsers | 17 | TextParser, MarkdownParser, DocxParser, PdfParser, factory |
-| Storage (InMemory) | 16 | CRUD, cosine search, filtering, persistence, validation |
+| Logger | 3 | NoopLogger, custom implementations |  
+| Chunking | 27 | Fixed, recursive, markdown strategies, overlap edge cases |
+| Parsers | 33 | All parsers + stripFrontMatter utility, factory, buffer handling |
+| Storage (InMemory) | 38 | CRUD, cosine search, filtering, persistence |
 | Storage (SQLite) | 18 | Add, search, delete, persistence, corruption handling |
 | BM25 Search | 23 | Construction, add/remove, search, scoring properties |
 | Hybrid Fusion | 16 | Score normalization, RRF, edge cases, weight tuning |
@@ -291,11 +293,11 @@ The project ships with **255 tests** across 18 test files:
 | Embeddings | 9 | Config, mocked API calls, error handling |
 | LLM | 11 | Generate, streaming, error handling |
 | Reranker | 13 | Score parsing, normalization, API errors, batching |
-| Query Rewriters | 18 | Simple rewriter (variants), LLM rewriter (dedup, stripping) |
-| RAG Core | 18 | Document management, query, config updates, Phase 3 integration |
+| Query Rewriters | 18 | Simple rewriter variants, LLM rewriter (dedup, stripping) || RAG Core | 32 | Document management, query, config updates |
 | Integration | 6 | Full addDocument → query flow with real store |
 
 API providers use **mocked `fetch`** — no network calls during tests.
+
 
 ## Known Limitations
 
@@ -304,6 +306,19 @@ API providers use **mocked `fetch`** — no network calls during tests.
 - **DOCX parsing:** Requires `mammoth` peer dependency.
 - **PDF parsing:** Requires `pdf-parse` peer dependency.
 - **SQLite vector store:** Uses `@libsql/client` (pure TS, works in Bun and Node.js).
+
+### Utility Functions
+
+**`stripFrontMatter(text: string) ⇒ string`**
+
+Remove YAML frontmatter from markdown content without instantiating a parser:
+
+```typescript
+import { stripFrontMatter } from 'rag-typescript';
+
+const cleanContent = stripFrontMatter(markdownTextWithYaml);
+```
+
 
 ## Roadmap
 

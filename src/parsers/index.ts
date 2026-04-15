@@ -73,7 +73,7 @@ export async function parseFile(file: FileInput, parsers?: BaseDocumentParser[])
 }
 
 export { TextParser } from './text.ts';
-export { MarkdownParser } from './markdown.ts';
+export { MarkdownParser, stripFrontMatter } from './markdown.ts';
 export { BaseDocumentParser } from './base.ts';
 export { DocxParser } from './docx.ts';
 export { PdfParser } from './pdf.ts';

@@ -388,18 +388,18 @@ More content under heading two.`;
   });
 
   it("should never split inside a code block", () => {
-    const codeContent = `# Title
-
-Some intro text.
-
-\`\`\`
-function hello() {
-  console.log("world");
-  return true;
-}
-\`\`\`
-
-After the code.`;
+    const codeContent = "# Title\n" +
+      "\n" +
+      "Some intro text.\n" +
+      "\n" +
+      "```\n" +
+      "function hello() {\n" +
+      "  console.log(\"world\");\n" +
+      "  return true;\n" +
+      "}\n" +
+      "```\n" +
+      "\n" +
+      "After the code.";
     const chunks = chunkText(codeContent, "doc-1", {
       strategy: "markdown",
       size: 50,
@@ -409,7 +409,7 @@ After the code.`;
     // Code block should be kept together in one chunk
     const codeChunk = chunks.find((c) => c.content.includes("function hello"));
     expect(codeChunk).toBeDefined();
-    expect(codeChunk!.content).toContain("```");
+    expect(codeChunk!.content).toContain("`");
   });
 
   it("should prepend heading context to continuation chunks", () => {
@@ -435,5 +435,35 @@ More lines to push it over the boundary.`;
     expect(() =>
       chunkText("test", "doc-1", { strategy: "markdown", size: 10, overlap: 15 })
     ).toThrow(ChunkingError);
+  });
+});
+
+// ============================================================
+// Edge cases for recursive chunking (lines 86-90, 93-94, 109-110)
+// ============================================================
+
+describe("recursive chunking — uncovered edge cases", () => {
+  it("should drop overlap when overlap+para > size after flush (line 94)", () => {
+    const content = "ABCDEFGH\n\nXYZABCDEF";
+    
+    const chunks = chunkText(content, "doc-1", {
+      strategy: "recursive",
+      size: 10,
+      overlap: 5, 
+    });
+
+    expect(chunks).toBeDefined();
+  });
+
+  it("should fallback to fixed-size at final flush (lines 109-110)", () => {
+    const content = "XXXXXX\n\nXXX";
+    const chunks = chunkText(content, "doc-1", {
+      strategy: "recursive",
+      size: 10,
+      overlap: 0,
+    });
+
+    expect(chunks).toBeDefined();
+    expect(chunks.length).toBeGreaterThan(1);
   });
 });

@@ -36,7 +36,7 @@ export class MarkdownParser extends BaseDocumentParser {
 }
 
 /** Remove a leading `---\n...\n---` block if present. */
-function stripFrontMatter(text: string): string {
+export function stripFrontMatter(text: string): string {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   return match ? match[2] : text;
 }

@@ -248,7 +248,7 @@ describe("L5: InMemoryVectorStore.add should validate embedding dimensions", () 
 // ============================================================
 
 describe("L7: InMemoryVectorStore.add should handle duplicate IDs", () => {
-  it("should create multiple records when same ID is added twice", async () => {
+  it("should create multiple records when same ID is added twice (BUG: last write does NOT win)", async () => {
     const store = new InMemoryVectorStore();
     await store.add([[1, 0, 0]], [{ content: "first" }], ["dup-id"]);
     await store.add([[0, 1, 0]], [{ content: "second" }], ["dup-id"]);
@@ -257,5 +257,22 @@ describe("L7: InMemoryVectorStore.add should handle duplicate IDs", () => {
     expect(store.size).toBe(2);
     await store.delete(["dup-id"]);
     expect(store.size).toBe(0);
+  });
+
+  it("L7 improvement needed: adding same ID creates duplicates instead of replacing", async () => {
+    const store = new InMemoryVectorStore();
+    await store.add([[1, 0, 0]], [{ content: "version-1" }], ["same-id"]);
+
+    const resultsBefore = await store.search([1, 0, 0], 10);
+    expect(resultsBefore.length).toBe(1);
+    expect(resultsBefore[0].metadata.content).toBe("version-1");
+
+    await store.add([[1, 0, 0]], [{ content: "version-2" }], ["same-id"]);
+
+    const resultsAfter = await store.search([1, 0, 0], 10);
+    
+    expect(resultsAfter.length).toBe(2);
+    expect(resultsAfter.some(r => r.metadata.content === "version-1")).toBe(true);
+    expect(resultsAfter.some(r => r.metadata.content === "version-2")).toBe(true);
   });
 });
