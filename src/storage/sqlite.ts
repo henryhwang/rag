@@ -133,6 +133,7 @@ export class SQLiteVectorStore implements VectorStore {
     embeddings: number[][],
     metadatas: Metadata[],
     ids?: string[],
+    options?: { replaceDuplicates?: boolean }, // L7 fix: control duplicate handling
   ): Promise<void> {
     await this.ensureInitialized();
 
@@ -177,18 +178,60 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     const client = this.client!;
+    const idSet = new Set<string>();
+    
     for (let i = 0; i < embeddings.length; i++) {
       const id = ids?.[i] ?? crypto.randomUUID();
-      const record: StoredRecord = {
-        id,
-        embedding: embeddings[i],
-        metadata: metadatas[i],
-      };
-      this.records.push(record);
-      await client.execute({
-        sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
-        args: [id, JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i])],
-      });
+      
+      // Check for duplicate ID in batch
+      if (idSet.has(id)) {
+        if (options?.replaceDuplicates) {
+          throw new VectorStoreError(
+            `Cannot use replaceDuplicates=true with internally generated duplicate IDs at position ${i}`,
+          );
+        }
+        continue; // Skip duplicate
+      }
+      
+      // Check if ID already exists in store
+      const existingRecord = this.records.find(r => r.id === id);
+      let wasReplaced = false;
+      if (existingRecord) {
+        if (options?.replaceDuplicates) {
+          // Replace existing record in memory and database
+          const index = this.records.indexOf(existingRecord);
+          const record: StoredRecord = {
+            id,
+            embedding: embeddings[i],
+            metadata: metadatas[i],
+          };
+          this.records[index] = record;
+          await client.execute({
+            sql: `UPDATE ${this.tableName} SET embedding = ?, metadata = ? WHERE id = ?`,
+            args: [JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i]), id],
+          });
+          wasReplaced = true;
+        } else {
+          // Skip to prevent duplicates (L7 fix)
+          continue;
+        }
+      }
+      
+      idSet.add(id);
+      
+      // Only insert new record if not replaced
+      if (!wasReplaced) {
+        const record: StoredRecord = {
+          id,
+          embedding: embeddings[i],
+          metadata: metadatas[i],
+        };
+        this.records.push(record);
+        await client.execute({
+          sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
+          args: [id, JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i])],
+        });
+      }
     }
   }
 

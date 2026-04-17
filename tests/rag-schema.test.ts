@@ -13,7 +13,7 @@ import * as os from 'node:os';
 
 // Mock embedding provider with configurable dimensions
 class ConfigurableEmbeddings {
-  readonly encodingFormat = 'float32';
+  readonly encodingFormat = 'float';
   
   constructor(readonly dimensions: number) {}
   

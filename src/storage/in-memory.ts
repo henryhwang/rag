@@ -35,6 +35,7 @@ export class InMemoryVectorStore implements VectorStore {
     embeddings: number[][],
     metadatas: Metadata[],
     ids?: string[],
+    options?: { replaceDuplicates?: boolean }, // New option
   ): Promise<void> {
     if (embeddings.length !== metadatas.length) {
       throw new VectorStoreError(
@@ -60,7 +61,7 @@ export class InMemoryVectorStore implements VectorStore {
         version: 1,
         embeddingDimension: dim || 0,
         embeddingModel: 'auto-detected',
-        encodingFormat: 'float32',
+        encodingFormat: 'float',
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -72,14 +73,50 @@ export class InMemoryVectorStore implements VectorStore {
       );
     }
 
-    // Store records
+    // Store records with duplicate detection
+    const idSet = new Set<string>();
     for (let i = 0; i < embeddings.length; i++) {
       const id = ids?.[i] ?? crypto.randomUUID();
-      this.records.push({
-        id,
-        embedding: embeddings[i],
-        metadata: metadatas[i],
-      });
+      
+      // Check for duplicate ID in batch
+      if (idSet.has(id)) {
+        if (options?.replaceDuplicates) {
+          throw new VectorStoreError(
+            `Cannot use replaceDuplicates=true with internally generated duplicate IDs at position ${i}`,
+          );
+        }
+        // Skip silently to prevent accidental duplicates
+        continue;
+      }
+      
+      // Check if ID already exists in store
+      const existingIndex = this.records.findIndex(r => r.id === id);
+      let wasReplaced = false;
+      if (existingIndex >= 0) {
+        if (options?.replaceDuplicates) {
+          // Replace existing record
+          this.records[existingIndex] = {
+            id,
+            embedding: embeddings[i],
+            metadata: metadatas[i],
+          };
+          wasReplaced = true;
+        } else {
+          // Skip to prevent duplicates (L7 fix)
+          continue;
+        }
+      }
+      
+      idSet.add(id);
+      
+      // Only push if not replaced
+      if (!wasReplaced) {
+        this.records.push({
+          id,
+          embedding: embeddings[i],
+          metadata: metadatas[i],
+        });
+      }
     }
 
     // Update timestamp
@@ -127,7 +164,7 @@ export class InMemoryVectorStore implements VectorStore {
         version: 1,
         embeddingDimension: this.records[0]?.embedding?.length ?? 0,
         embeddingModel: 'empty-store',
-        encodingFormat: 'float32',
+        encodingFormat: 'float',
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -189,7 +226,7 @@ export class InMemoryVectorStore implements VectorStore {
         version: 0, // Legacy version marker
         embeddingDimension: firstDim,
         embeddingModel: 'legacy-format',
-        encodingFormat: 'float32',
+        encodingFormat: 'float',
         createdAt: new Date(),
         updatedAt: new Date(),
       };

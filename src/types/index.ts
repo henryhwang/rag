@@ -33,7 +33,7 @@ export interface VectorStoreSchemaMetadata {
   version: number;                    // Schema version for migrations
   embeddingDimension: number;         // Required: locked dimension count
   embeddingModel?: string;            // Optional: model name for debugging
-  encodingFormat?: string;            // Optional: 'float32', 'binary', etc.
+  encodingFormat?: string;            // Optional: 'float', 'binary', etc.
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,10 +51,13 @@ export interface EmbeddingProvider {
 export interface VectorStore {
   /** Schema metadata - read-only, reflects what's persisted in store */
   readonly metadata: VectorStoreSchemaMetadata | null;
+  /** Number of records in the store (optional, read-only) */
+  readonly size?: number;
   add(
     embeddings: number[][],
     metadatas: Metadata[],
     ids?: string[],
+    options?: { replaceDuplicates?: boolean }, // L7 fix: control duplicate handling
   ): Promise<void>;
   search(
     query: number[],
@@ -202,6 +205,15 @@ export const DEFAULT_HYBRID_CONFIG: HybridSearchConfig = {
   bm25B: 0.75,
 };
 
+// -- Retry Config (for network operations) --------------------------
+
+export interface RetryConfig {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffMultiplier?: number;
+}
+
 // -- LLM --------------------------------------------------------------
 
 export interface LLMMessage {
@@ -234,6 +246,14 @@ export interface RAGConfig {
   vectorStore: VectorStore;
   chunking?: Partial<ChunkOptions>;
   logger?: Logger;
+  /** Request timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Retry configuration for network operations */
+  retry?: RetryConfig;
+  /** Maximum concurrent requests (optional rate limiting) */
+  maxConcurrency?: number;
+  /** Whether to gracefully degrade when optional features unavailable */
+  fallbackOnMissingFeature?: boolean;
 }
 
 // -- Logger -----------------------------------------------------------

@@ -249,32 +249,33 @@ describe("L5: InMemoryVectorStore.add should validate embedding dimensions", () 
 // L7: no duplicate ID check in InMemoryVectorStore.add
 // ============================================================
 
-describe("L7: InMemoryVectorStore.add should handle duplicate IDs", () => {
-  it("should create multiple records when same ID is added twice (BUG: last write does NOT win)", async () => {
+describe('L7: InMemoryVectorStore.add duplicate ID handling', () => {
+  it('should skip duplicates by default (no accidental data bloat)', async () => {
     const store = new InMemoryVectorStore();
-    await store.add([[1, 0, 0]], [{ content: "first" }], ["dup-id"]);
-    await store.add([[0, 1, 0]], [{ content: "second" }], ["dup-id"]);
+    await store.add([[1, 0, 0]], [{ content: 'first' }], ['dup-id']);
+    await store.add([[0, 1, 0]], [{ content: 'second' }], ['dup-id']);
 
-    // Two records with the same ID exist — delete removes both
-    expect(store.size).toBe(2);
-    await store.delete(["dup-id"]);
+    // Should only have one record (duplicates skipped)
+    expect(store.size).toBe(1);
+    await store.delete(['dup-id']);
     expect(store.size).toBe(0);
   });
 
-  it("L7 improvement needed: adding same ID creates duplicates instead of replacing", async () => {
+  it('should allow replacing existing records with replaceDuplicates=true', async () => {
     const store = new InMemoryVectorStore();
-    await store.add([[1, 0, 0]], [{ content: "version-1" }], ["same-id"]);
+    await store.add([[1, 0, 0]], [{ content: 'version-1' }], ['same-id']);
 
     const resultsBefore = await store.search([1, 0, 0], 10);
     expect(resultsBefore.length).toBe(1);
-    expect(resultsBefore[0].metadata.content).toBe("version-1");
+    expect(resultsBefore[0].metadata.content).toBe('version-1');
 
-    await store.add([[1, 0, 0]], [{ content: "version-2" }], ["same-id"]);
+    // Replace existing record
+    await store.add([[1, 0, 0]], [{ content: 'version-2' }], ['same-id'], { replaceDuplicates: true });
 
     const resultsAfter = await store.search([1, 0, 0], 10);
     
-    expect(resultsAfter.length).toBe(2);
-    expect(resultsAfter.some(r => r.metadata.content === "version-1")).toBe(true);
-    expect(resultsAfter.some(r => r.metadata.content === "version-2")).toBe(true);
+    // Still one record, but updated
+    expect(resultsAfter.length).toBe(1);
+    expect(resultsAfter[0].metadata.content).toBe('version-2');
   });
 });

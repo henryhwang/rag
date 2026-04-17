@@ -9,7 +9,7 @@ import { RAG, InMemoryVectorStore } from '../src/index.ts';
 
 // Mock embedding provider with configurable dimensions
 class ConfigurableEmbeddings {
-  readonly encodingFormat = 'float32';
+  readonly encodingFormat = 'float';
   
   constructor(readonly dimensions: number) {}
   

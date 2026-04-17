@@ -294,14 +294,12 @@ This will cause search to fail! To fix:
       this.logger.warn(result.warning);
     } else {
       const meta = this.config.vectorStore.metadata;
+      const sizeHint = this.config.vectorStore.size;
       this.logger.info(
         '✓ Configuration validated: %dD vectors (%s), %d records',
         meta?.embeddingDimension ?? 0,
         meta?.embeddingModel ?? 'unknown',
-        this.config.vectorStore ? 'size' in this.config.vectorStore
-          ? (this.config.vectorStore as any).size
-          : 'unknown'
-          : 'unknown',
+        sizeHint ?? 'unknown',
       );
     }
   }
@@ -312,12 +310,10 @@ This will cause search to fail! To fix:
   getKnowledgeBaseInfo() {
     const meta = this.config.vectorStore.metadata;
     const docs = this.listDocuments();
-    const sizeHint = ('size' in this.config.vectorStore)
-      ? (this.config.vectorStore as any).size
-      : undefined;
+    const sizeHint = this.config.vectorStore.size;
 
     return {
-      recordCount: sizeHint ?? docs.length * (this.chunkOptions.size ? 10 : 'unknown'),
+      recordCount: sizeHint ?? (this.chunkOptions.size ? docs.length * 10 : undefined),
       documentCount: docs.length,
       embeddingDimension: meta?.embeddingDimension ?? 0,
       embeddingModel: meta?.embeddingModel,

@@ -113,3 +113,9 @@ export {
 
 // Phase 3: RAG Phase 3 config
 export { type RAGPhase3Config } from './core/RAG.ts';
+
+// Reliability utilities
+export {
+  retryAsync,
+  type RetryConfig as RetryUtilityConfig,
+} from './utils/retry.ts';
