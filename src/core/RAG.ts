@@ -14,6 +14,7 @@ import {
   LLMProvider,
   Reranker,
   QueryRewriter,
+  VectorStoreSchemaMetadata,
 } from '../types/index.ts';
 import { DEFAULT_CHUNK_OPTIONS, DEFAULT_SEARCH_OPTIONS } from '../types/index.ts';
 import { parseFile, resolveParser } from '../parsers/index.ts';
@@ -215,6 +216,116 @@ export class RAG {
     if (partial.embeddings !== undefined || partial.vectorStore !== undefined) {
       this.queryEngine = this.createQueryEngine();
     }
+  }
+
+  /**
+   * Validate that configured EmbeddingProvider matches what's in the vector store.
+   * Call this after loading a persisted store to catch configuration drift early.
+   */
+  async validateConfiguration(): Promise<{ 
+    isValid: boolean; 
+    warning?: string; 
+    error?: string; 
+  }> {
+    const storeMeta = this.config.vectorStore.metadata;
+    const providerDim = this.config.embeddings.dimensions;
+
+    if (!storeMeta) {
+      return { 
+        isValid: true, 
+        warning: 'Vector store has no metadata (empty or legacy). Configuration cannot be validated.',
+      };
+    }
+
+    if (storeMeta.embeddingDimension === 0) {
+      return { 
+        isValid: true, 
+        warning: 'Vector store dimension not yet set (first add will initialize).',
+      };
+    }
+
+    if (providerDim !== storeMeta.embeddingDimension) {
+      return {
+        isValid: false,
+        error: `
+Embedding configuration mismatch!
+
+  Stored vectors:     ${storeMeta.embeddingDimension}D (${storeMeta.embeddingModel || 'unknown'})
+  Current provider:   ${providerDim}D
+  Difference:         ${Math.abs(providerDim - storeMeta.embeddingDimension)}D
+
+This will cause search to fail! To fix:
+  1. Reconfigure your EmbeddingProvider to match stored vectors, OR
+  2. Delete all documents and re-index with current configuration` .trim(),
+      };
+    }
+
+    // Optional warning if model name is known and differs
+    if (
+      storeMeta.embeddingModel &&
+      storeMeta.embeddingModel !== 'auto-detected' &&
+      storeMeta.embeddingModel !== 'unknown'
+    ) {
+      // Note: We can't reliably detect provider model name without extra metadata on provider
+      // This would require EmbeddingProvider to expose a .model property
+      this.logger.debug(
+        'Store was created with model: %s (dimensional match confirmed)',
+        storeMeta.embeddingModel,
+      );
+    }
+
+    return { isValid: true };
+  }
+
+  /**
+   * Convenience method: Load store with automatic validation.
+   * Throws RAGError if configuration is incompatible.
+   */
+  async loadAndValidate(storePath: string): Promise<void> {
+    await this.config.vectorStore.load(storePath);
+
+    const result = await this.validateConfiguration();
+
+    if (!result.isValid) {
+      throw new RAGError(result.error!);
+    }
+
+    if (result.warning) {
+      this.logger.warn(result.warning);
+    } else {
+      const meta = this.config.vectorStore.metadata;
+      this.logger.info(
+        '✓ Configuration validated: %dD vectors (%s), %d records',
+        meta?.embeddingDimension ?? 0,
+        meta?.embeddingModel ?? 'unknown',
+        this.config.vectorStore ? 'size' in this.config.vectorStore
+          ? (this.config.vectorStore as any).size
+          : 'unknown'
+          : 'unknown',
+      );
+    }
+  }
+
+  /**
+   * Get summary information about the knowledge base.
+   */
+  getKnowledgeBaseInfo() {
+    const meta = this.config.vectorStore.metadata;
+    const docs = this.listDocuments();
+    const sizeHint = ('size' in this.config.vectorStore)
+      ? (this.config.vectorStore as any).size
+      : undefined;
+
+    return {
+      recordCount: sizeHint ?? docs.length * (this.chunkOptions.size ? 10 : 'unknown'),
+      documentCount: docs.length,
+      embeddingDimension: meta?.embeddingDimension ?? 0,
+      embeddingModel: meta?.embeddingModel,
+      chunkStrategy: this.chunkOptions.strategy,
+      chunkSize: this.chunkOptions.size,
+      createdAt: meta?.createdAt,
+      updatedAt: meta?.updatedAt,
+    };
   }
 
   // -- Private helpers ------------------------------------------------

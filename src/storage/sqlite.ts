@@ -5,7 +5,7 @@
 // ============================================================
 
 import { createClient, type Client } from '@libsql/client';
-import { VectorStore, Metadata, SearchResult, Filter } from '../types/index.ts';
+import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -14,6 +14,15 @@ interface StoredRecord {
   id: string;
   embedding: number[];
   metadata: Metadata;
+}
+
+/** Serializable format with embedded schema metadata */
+interface SerializableStore {
+  _meta: Omit<VectorStoreSchemaMetadata, 'createdAt' | 'updatedAt'> & {
+    createdAt: string;
+    updatedAt: string;
+  };
+  records: StoredRecord[];
 }
 
 export interface SQLiteVectorStoreConfig {
@@ -35,10 +44,16 @@ export class SQLiteVectorStore implements VectorStore {
   private readonly tableName: string;
   private records: StoredRecord[] = [];
   private initialized = false;
+  private _metadata: VectorStoreSchemaMetadata | null = null;
 
   constructor(config?: SQLiteVectorStoreConfig) {
     this.url = config?.url ?? DEFAULT_URL;
     this.tableName = config?.tableName ?? DEFAULT_TABLE_NAME;
+  }
+
+  /** Schema metadata - read-only access */
+  get metadata(): VectorStoreSchemaMetadata | null {
+    return this._metadata;
   }
 
   /** Initialize the store. Call this explicitly, or it's called lazily by add/search/delete. */
@@ -50,6 +65,16 @@ export class SQLiteVectorStore implements VectorStore {
     if (this.initialized) return;
 
     this.client = createClient({ url: this.url });
+
+    // Create schema metadata table
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS _schema (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
+
+    // Create data table
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS ${this.tableName} (
         id TEXT PRIMARY KEY,
@@ -58,9 +83,50 @@ export class SQLiteVectorStore implements VectorStore {
       )
     `);
 
+    // Load or initialize schema metadata
+    await this.loadSchemaMetadata();
+
     // Load existing records into memory for search
     await this.loadFromDB();
     this.initialized = true;
+  }
+
+  /** Load schema metadata from _schema table, or create default if not exists */
+  private async loadSchemaMetadata(): Promise<void> {
+    const client = this.client!;
+    
+    const result = await client.execute('SELECT COUNT(*) as cnt FROM _schema');
+    const count = result.rows[0]?.cnt as unknown as number;
+
+    if (count === 0) {
+      // Initialize empty schema (dimension will be set on first insert)
+      const now = new Date().toISOString();
+      await client.execute(
+        `INSERT INTO _schema (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)`,
+        [
+          'version', '1',
+          'embedding_dimension', '0',
+          'embedding_model', '"auto-detected"',
+          'created_at', now,
+          'updated_at', now,
+        ],
+      );
+    }
+
+    // Read schema values
+    const rows = await client.execute('SELECT key, value FROM _schema');
+    const map: Record<string, string> = {};
+    for (const row of rows.rows) {
+      map[row.key as string] = row.value as string;
+    }
+
+    this._metadata = {
+      version: parseInt(map.version ?? '0'),
+      embeddingDimension: parseInt(map.embedding_dimension ?? '0'),
+      embeddingModel: JSON.parse(map.embedding_model ?? '"unknown"'),
+      createdAt: new Date(map.created_at ?? Date.now()),
+      updatedAt: new Date(map.updated_at ?? Date.now()),
+    };
   }
 
   async add(
@@ -76,26 +142,38 @@ export class SQLiteVectorStore implements VectorStore {
       );
     }
 
-    // Validate consistent dimensions
-    let newDim: number | undefined;
+    const dim = embeddings[0]?.length;
+    
+    // Validate all new embeddings have consistent dimensions
     for (const emb of embeddings) {
-      if (newDim === undefined) {
-        newDim = emb.length;
-      } else if (emb.length !== newDim) {
+      if (emb.length !== dim) {
         throw new VectorStoreError(
-          `Inconsistent embedding dimensions: ${emb.length} vs expected ${newDim}`,
+          `Inconsistent embedding dimensions: ${emb.length} vs expected ${dim}`,
         );
       }
     }
 
-    // Validate against existing records
-    if (newDim !== undefined && this.records.length > 0) {
-      const existingDim = this.records[0].embedding.length;
-      if (newDim !== existingDim) {
-        throw new VectorStoreError(
-          `Embedding dimension mismatch: new ${newDim} vs existing ${existingDim}`,
-        );
-      }
+    // Initialize or validate dimension against stored schema
+    if (!this._metadata || this._metadata.embeddingDimension === 0) {
+      // First insert - lock in dimension via schema table
+      const client = this.client!;
+      await client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
+        [String(dim || 0)],
+      );
+      await client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
+        [new Date().toISOString()],
+      );
+      // Refresh cached metadata
+      this._metadata!.embeddingDimension = dim || 0;
+      this._metadata!.updatedAt = new Date();
+    } else if (dim !== this._metadata.embeddingDimension) {
+      // Subsequent inserts - validate match
+      throw new VectorStoreError(
+        `Embedding dimension mismatch: got ${dim}, expected ${this._metadata.embeddingDimension}\n` +
+        `Hint: Use the same embedding model/configuration as when you indexed documents.`,
+      );
     }
 
     const client = this.client!;
@@ -159,8 +237,29 @@ export class SQLiteVectorStore implements VectorStore {
   }
 
   async save(filePath: string): Promise<void> {
-    // Export records to JSON for interoperability with other stores
-    const data = JSON.stringify(this.records, null, 2);
+    await this.ensureInitialized();
+
+    // Ensure metadata exists
+    if (!this._metadata) {
+      this._metadata = {
+        version: 1,
+        embeddingDimension: this.records[0]?.embedding?.length ?? 0,
+        embeddingModel: 'empty-store',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+
+    const serializable: SerializableStore = {
+      _meta: {
+        ...this._metadata,
+        createdAt: this._metadata.createdAt.toISOString(),
+        updatedAt: this._metadata.updatedAt.toISOString(),
+      },
+      records: this.records,
+    };
+
+    const data = JSON.stringify(serializable, null, 2);
     await fs.writeFile(filePath, data, 'utf-8');
   }
 
@@ -183,45 +282,111 @@ export class SQLiteVectorStore implements VectorStore {
       });
     }
 
-    if (!Array.isArray(parsed)) {
-      throw new VectorStoreError('Corrupt store: expected an array');
-    }
+    // Support both new format (with _meta) and legacy format (array only)
+    let meta: VectorStoreSchemaMetadata;
+    let records: StoredRecord[];
 
-    let expectedDIM: number | undefined;
-    const records: StoredRecord[] = [];
+    if (parsed && typeof parsed === 'object' && '_meta' in parsed) {
+      // New format with schema metadata
+      const typed = parsed as SerializableStore;
+      
+      if (!typed._meta || !Array.isArray(typed.records)) {
+        throw new VectorStoreError('Corrupt store: invalid schema structure');
+      }
 
-    for (let i = 0; i < parsed.length; i++) {
-      const item = parsed[i] as Record<string, unknown>;
-      if (!item || typeof item !== 'object' || !('id' in item) || !('embedding' in item)) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} is missing required fields`,
-        );
+      meta = {
+        version: typed._meta.version,
+        embeddingDimension: typed._meta.embeddingDimension,
+        embeddingModel: typed._meta.embeddingModel,
+        createdAt: new Date(typed._meta.createdAt),
+        updatedAt: new Date(typed._meta.updatedAt),
+      };
+      records = typed.records;
+    } else {
+      // Legacy format - array only
+      if (!Array.isArray(parsed)) {
+        throw new VectorStoreError('Corrupt store: expected array or wrapped object');
       }
-      const embedding = item.embedding as number[];
-      if (!Array.isArray(embedding)) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} has non-array embedding`,
-        );
+
+      if (parsed.length === 0) {
+        throw new VectorStoreError('Cannot determine dimension from empty store');
       }
-      if (expectedDIM === undefined) {
-        expectedDIM = embedding.length;
-      } else if (embedding.length !== expectedDIM) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} has dimension ${embedding.length}, expected ${expectedDIM}`,
-        );
-      }
-      records.push({
-        id: item.id as string,
-        embedding,
-        metadata: (item.metadata as Metadata) ?? {},
+
+      const firstDim = Array.isArray(parsed[0]?.embedding) 
+        ? (parsed[0].embedding as number[]).length 
+        : 0;
+
+      meta = {
+        version: 0, // Legacy version marker
+        embeddingDimension: firstDim,
+        embeddingModel: 'legacy-format',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      records = parsed.map((item, i) => {
+        const obj = item as Record<string, unknown>;
+        if (!obj || typeof obj !== 'object' || !('id' in obj) || !('embedding' in obj)) {
+          throw new VectorStoreError(
+            `Corrupt store: record ${i} is missing required fields`,
+          );
+        }
+        const embedding = obj.embedding as number[];
+        if (!Array.isArray(embedding)) {
+          throw new VectorStoreError(
+            `Corrupt store: record ${i} has non-array embedding`,
+          );
+        }
+        return {
+          id: obj.id as string,
+          embedding,
+          metadata: (obj.metadata as Metadata) ?? {},
+        };
       });
+
+      console.warn(
+        'Loaded legacy format store (v%d). Call save() to upgrade with schema metadata.',
+        meta.version,
+      );
     }
 
+    // Validate all records match schema
+    for (let i = 0; i < records.length; i++) {
+      const embLen = records[i].embedding.length;
+      if (embLen !== meta.embeddingDimension) {
+        throw new VectorStoreError(
+          `Record ${i} has wrong dimension: ${embLen} (expected ${meta.embeddingDimension}).\n` +
+          'This may indicate file corruption or manual editing.'
+        );
+      }
+    }
+
+    this._metadata = meta;
     this.records = records;
 
-    // If client is initialized, sync the loaded records to DB
-    if (this.client) {
+    // If client is initialized, sync the loaded records to DB and schema table
+    if (this.client && this.initialized) {
       await this.client.execute({ sql: `DELETE FROM ${this.tableName}`, args: [] });
+      
+      // Update schema table
+      await this.client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'version'`,
+        [String(meta.version)],
+      );
+      await this.client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
+        [String(meta.embeddingDimension)],
+      );
+      await this.client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'embedding_model'`,
+        [JSON.stringify(meta.embeddingModel)],
+      );
+      await this.client.execute(
+        `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
+        [meta.updatedAt.toISOString()],
+      );
+
+      // Insert all records
       for (const rec of records) {
         await this.client.execute({
           sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,

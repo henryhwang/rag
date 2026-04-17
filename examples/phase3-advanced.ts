@@ -22,6 +22,7 @@ import {
 // -- Mock EmbeddingProvider -------------------------------------
 
 class MockEmbeddings {
+  readonly encodingFormat = "float"
   readonly dimensions = 4;
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((t) => {
@@ -38,7 +39,7 @@ class MockLLM {
   async generate(prompt: string): Promise<string> {
     return `[Mock LLM] Answer based on retrieved context.`;
   }
-  async *stream(_prompt: string): AsyncIterable<string> {}
+  async *stream(_prompt: string): AsyncIterable<string> { }
 }
 
 // -- Main -------------------------------------------------------
@@ -66,25 +67,25 @@ async function main() {
       path: "typescript-intro.txt",
       content: Buffer.from(
         "TypeScript is a strongly typed programming language that builds on JavaScript. " +
-          "It adds static type checking, interfaces, generics, and modern language features. " +
-          "TypeScript compiles down to plain JavaScript that runs in any browser or Node.js environment."
+        "It adds static type checking, interfaces, generics, and modern language features. " +
+        "TypeScript compiles down to plain JavaScript that runs in any browser or Node.js environment."
       ),
     },
     {
       path: "python-intro.txt",
       content: Buffer.from(
         "Python is a high-level, interpreted programming language known for readability. " +
-          "It supports multiple paradigms including procedural, object-oriented, and functional programming. " +
-          "Python is widely used in data science, machine learning, and web development."
+        "It supports multiple paradigms including procedural, object-oriented, and functional programming. " +
+        "Python is widely used in data science, machine learning, and web development."
       ),
     },
     {
       path: "api-design.txt",
       content: Buffer.from(
         "RESTful API design follows principles of statelessness, resource-oriented URLs, " +
-          "and standard HTTP methods. Good API design includes proper error handling, " +
-          "versioning, pagination, rate limiting, and comprehensive documentation. " +
-          "TypeScript helps define clear API contracts with interfaces and types."
+        "and standard HTTP methods. Good API design includes proper error handling, " +
+        "versioning, pagination, rate limiting, and comprehensive documentation. " +
+        "TypeScript helps define clear API contracts with interfaces and types."
       ),
     },
   ];

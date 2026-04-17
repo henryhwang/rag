@@ -28,16 +28,29 @@ export interface Metadata {
 
 export type Filter = Record<string, string | number | boolean>;
 
+/** Schema metadata for vector stores - enables decoupled creation/consumption */
+export interface VectorStoreSchemaMetadata {
+  version: number;                    // Schema version for migrations
+  embeddingDimension: number;         // Required: locked dimension count
+  embeddingModel?: string;            // Optional: model name for debugging
+  encodingFormat?: string;            // Optional: 'float32', 'binary', etc.
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // -- Embedding --------------------------------------------------------
 
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>;
   dimensions: number;
+  encodingFormat: string;
 }
 
 // -- Vector Store -----------------------------------------------------
 
 export interface VectorStore {
+  /** Schema metadata - read-only, reflects what's persisted in store */
+  readonly metadata: VectorStoreSchemaMetadata | null;
   add(
     embeddings: number[][],
     metadatas: Metadata[],

@@ -14,7 +14,7 @@ describe("Coverage: getters and small methods", () => {
 
   it("OpenAICompatibleEmbeddings.dimensions returns default", () => {
     const emb = new OpenAICompatibleEmbeddings({ apiKey: "sk-test" });
-    expect(emb.dimensions).toBe(1536);
+    expect(emb.dimensions).toBe(1024);
   });
 
   it("SimpleQueryRewriter.name returns correct string", () => {

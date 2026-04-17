@@ -198,8 +198,10 @@ describe('SQLiteVectorStore', () => {
       store.close();
 
       const data = JSON.parse(await fs.readFile(jsonPath, 'utf-8'));
-      expect(data).toHaveLength(1);
-      expect(data[0].id).toBe('id1');
+      // New format: { _meta: {...}, records: [...] }
+      expect(data._meta).toBeDefined();
+      expect(data.records).toHaveLength(1);
+      expect(data.records[0].id).toBe('id1');
     });
 
     test('load from JSON file', async () => {

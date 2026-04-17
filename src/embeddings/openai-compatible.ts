@@ -11,14 +11,17 @@ export interface OpenAICompatibleEmbeddingsConfig {
   baseURL?: string;
   model?: string;
   dimensions?: number;
+  encodingFormat?: string;
 }
 
+const DEFAULT_DIMENSIONS = 1024;
+const DEFAULT_ENCODINGFORMAT = "float";
 const DEFAULT_MODEL = 'text-embedding-3-small';
-const DEFAULT_DIMENSIONS = 1536;
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
 export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
   readonly dimensions: number;
+  readonly encodingFormat: string;
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly model: string;
@@ -28,6 +31,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
     this.baseURL = config.baseURL ?? DEFAULT_BASE_URL;
     this.model = config.model ?? DEFAULT_MODEL;
     this.dimensions = config.dimensions ?? DEFAULT_DIMENSIONS;
+    this.encodingFormat = config.encodingFormat ?? DEFAULT_ENCODINGFORMAT;
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -43,10 +47,9 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       input: texts,
+      dimensions: this.dimensions,
+      encoding_format: this.encodingFormat
     };
-    if (this.dimensions !== DEFAULT_DIMENSIONS) {
-      body.dimensions = this.dimensions;
-    }
 
     let response: Response;
     try {

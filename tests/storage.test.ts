@@ -216,8 +216,10 @@ describe("M12: null metadata survives save/load", () => {
     const raw = await fs.readFile(saveFile, "utf-8");
     const parsed = JSON.parse(raw);
 
+    // New format wraps records in { _meta, records: [...] }
     // null survives JSON.stringify (unlike undefined)
-    expect(parsed[0].metadata.missing).toBeNull();
+    expect(parsed._meta).toBeDefined();
+    expect(parsed.records[0].metadata.missing).toBeNull();
 
     const store2 = new InMemoryVectorStore();
     await store2.load(saveFile);

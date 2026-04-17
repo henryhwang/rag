@@ -1,3 +1,4 @@
+//import { describe, it, expect, afterEach } from "bun:test";
 import { describe, it, expect, afterEach } from "bun:test";
 import { OpenAICompatibleEmbeddings } from "../src/embeddings/index.ts";
 import { EmbeddingError } from "../src/errors/index.ts";
@@ -23,7 +24,7 @@ function restoreFetch() {
 describe("OpenAICompatibleEmbeddings — config", () => {
   it("should use defaults", () => {
     const emb = new OpenAICompatibleEmbeddings({ apiKey: "test-key" });
-    expect(emb.dimensions).toBe(1536);
+    expect(emb.dimensions).toBe(1024);
   });
 
   it("should accept custom dimensions and model", () => {

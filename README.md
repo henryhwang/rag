@@ -9,6 +9,8 @@ A modular TypeScript library for managing **Retrieval-Augmented Generation (RAG)
 - **Flexible chunking** — fixed-size, recursive (paragraphs → sentences), and markdown (headings, code blocks)
 - **OpenAI-compatible API support** — works with OpenAI, Ollama, vLLM, LiteLLM, and any compatible endpoint
 - **Zero-setup defaults** — in-memory vector store with cosine similarity and JSON persistence
+- **Schema metadata tracking** — vector stores auto-track embedding dimensions and model info for safe validation
+- **Fail-fast configuration validation** — detect embedding mismatches before queries fail
 - **Fully typed** — end-to-end TypeScript with declaration files and strict mode
 
 ## Installation
@@ -88,6 +90,13 @@ bun examples/basic.ts
 Swap `MockEmbeddings` and `MockLLM` for `OpenAICompatibleEmbeddings`
 and `OpenAICompatibleLLM` with real credentials to get actual semantic retrieval.
 
+### Advanced Examples
+
+- **Chunking Strategy Guide**: `bun examples/chunking-strategy-guide.ts` — compare chunking strategies
+- **Query Rewrite Detection**: `bun examples/query-rewriter-strategy.ts` — smart query expansion
+- **Schema Metadata Demo**: `bun examples/schema-metadata-demo.ts` — decoupled creation/consumption patterns
+- **Phase 3 Features**: `examples/phase3-advanced.ts` — hybrid search, reranking, query rewriting
+
 ## API Reference
 
 ### `RAG`
@@ -114,6 +123,9 @@ Main entry point combining all modules.
 | `query(question, options?)` | Retrieve relevant chunks |
 | `queryAndAnswer(question, options)` | Retrieve context and generate an answer (requires `options.llm`) |
 | `updateConfig(partial)` | Update configuration at runtime |
+| `validateConfiguration()` | Validate embedding provider matches stored vectors |
+| `loadAndValidate(path)` | Load persisted store and validate configuration |
+| `getKnowledgeBaseInfo()` | Get summary statistics about the knowledge base |
 
 ### Chunking Options
 
@@ -165,6 +177,53 @@ interface QueryOptions extends SearchOptions {
 ```
 
 > **Note:** Metadata filtering currently supports exact-match only (no ranges, operators, or regex).
+
+## Schema Metadata & Configuration Validation
+
+Vector stores now embed **schema metadata** with every save, enabling:
+
+### 1. Decoupled Creation/Consumption
+
+Different teams can work independently without coordinating embedding configurations:
+
+```typescript
+// Team A: Build knowledge base
+const store = new InMemoryVectorStore();
+await rag.addDocuments(files);
+store.save('knowledge-base.json'); // Includes dimension info
+
+// Team B: Load and auto-discover requirements
+const loadedStore = new InMemoryVectorStore();
+await loadedStore.load('knowledge-base.json');
+console.log(loadedStore.metadata); // { embeddingDimension: 1536, ... }
+```
+
+### 2. Fail-Fast Validation
+
+Detect configuration drift before accepting traffic:
+
+```typescript
+const rag = new RAG({ /* config */ });
+
+try {
+  await rag.loadAndValidate('./knowledge-base.json');
+  console.log('✓ Configuration validated');
+} catch (error) {
+  console.error('❌ Embedding mismatch:', error.message);
+  process.exit(1); // Fail fast!
+}
+```
+
+### 3. Better Debugging
+
+Inspect what model/dimension was used when creating the store:
+
+```typescript
+const info = rag.getKnowledgeBaseInfo();
+console.log(`Vectors: ${info.embeddingDimension}D from ${info.embeddingModel}`);
+```
+
+For complete documentation, see [`examples/SCHEMA_METADATA_README.md`](./examples/SCHEMA_METADATA_README.md).
 
 ## Architecture
 
@@ -277,7 +336,7 @@ npm run test:watch  # Watch mode
 
 ## Test Coverage
 
-The project ships with **294 tests** across 21 test files:
+The project ships with **296 tests** across 22 test files:
 
 | Module | Tests | Coverage |
 |--------|-------|----------|

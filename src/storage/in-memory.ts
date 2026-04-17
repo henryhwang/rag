@@ -3,7 +3,7 @@
 // No dependencies, suitable for prototyping and testing.
 // ============================================================
 
-import { VectorStore, Metadata, SearchResult, Filter } from '../types/index.ts';
+import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
 import * as fs from 'node:fs/promises';
 
@@ -13,8 +13,23 @@ interface StoredRecord {
   metadata: Metadata;
 }
 
+/** Serializable format with embedded schema metadata */
+interface SerializableStore {
+  _meta: Omit<VectorStoreSchemaMetadata, 'createdAt' | 'updatedAt'> & {
+    createdAt: string;
+    updatedAt: string;
+  };
+  records: StoredRecord[];
+}
+
 export class InMemoryVectorStore implements VectorStore {
   private records: StoredRecord[] = [];
+  private _metadata: VectorStoreSchemaMetadata | null = null;
+
+  /** Schema metadata - read-only access */
+  get metadata(): VectorStoreSchemaMetadata | null {
+    return this._metadata;
+  }
 
   async add(
     embeddings: number[][],
@@ -27,28 +42,37 @@ export class InMemoryVectorStore implements VectorStore {
       );
     }
 
-    // L5: Validate consistent dimensions across all new embeddings
-    let newDim: number | undefined;
+    const dim = embeddings[0]?.length;
+    
+    // Validate all new embeddings have consistent dimensions
     for (const emb of embeddings) {
-      if (newDim === undefined) {
-        newDim = emb.length;
-      } else if (emb.length !== newDim) {
+      if (emb.length !== dim) {
         throw new VectorStoreError(
-          `Inconsistent embedding dimensions: ${emb.length} vs expected ${newDim}`,
+          `Inconsistent embedding dimensions: ${emb.length} vs expected ${dim}`,
         );
       }
     }
 
-    // Validate against existing records
-    if (newDim !== undefined && this.records.length > 0) {
-      const existingDim = this.records[0].embedding.length;
-      if (newDim !== existingDim) {
-        throw new VectorStoreError(
-          `Embedding dimension mismatch: new ${newDim} vs existing ${existingDim}`,
-        );
-      }
+    // Initialize or validate dimension against existing store
+    if (!this._metadata) {
+      // First insert - lock in dimension
+      this._metadata = {
+        version: 1,
+        embeddingDimension: dim || 0,
+        embeddingModel: 'auto-detected',
+        encodingFormat: 'float32',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    } else if (dim !== this._metadata.embeddingDimension) {
+      // Subsequent inserts - validate match
+      throw new VectorStoreError(
+        `Embedding dimension mismatch: got ${dim}, expected ${this._metadata.embeddingDimension}\n` +
+        `Hint: Use the same embedding model/configuration as when you indexed documents.`,
+      );
     }
 
+    // Store records
     for (let i = 0; i < embeddings.length; i++) {
       const id = ids?.[i] ?? crypto.randomUUID();
       this.records.push({
@@ -56,6 +80,11 @@ export class InMemoryVectorStore implements VectorStore {
         embedding: embeddings[i],
         metadata: metadatas[i],
       });
+    }
+
+    // Update timestamp
+    if (this._metadata) {
+      this._metadata.updatedAt = new Date();
     }
   }
 
@@ -92,7 +121,28 @@ export class InMemoryVectorStore implements VectorStore {
   }
 
   async save(filePath: string): Promise<void> {
-    const data = JSON.stringify(this.records, null, 2);
+    if (!this._metadata) {
+      // Create minimal metadata if saving before any adds
+      this._metadata = {
+        version: 1,
+        embeddingDimension: this.records[0]?.embedding?.length ?? 0,
+        embeddingModel: 'empty-store',
+        encodingFormat: 'float32',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+
+    const serializable: SerializableStore = {
+      _meta: {
+        ...this._metadata,
+        createdAt: this._metadata.createdAt.toISOString(),
+        updatedAt: this._metadata.updatedAt.toISOString(),
+      },
+      records: this.records,
+    };
+
+    const data = JSON.stringify(serializable, null, 2);
     await fs.writeFile(filePath, data, 'utf-8');
   }
 
@@ -100,41 +150,88 @@ export class InMemoryVectorStore implements VectorStore {
     const data = await fs.readFile(filePath, 'utf-8');
     const parsed: unknown = JSON.parse(data);
 
-    if (!Array.isArray(parsed)) {
-      throw new VectorStoreError('Corrupt store: expected an array');
-    }
+    // Support both new format (with _meta) and legacy format (array only)
+    let meta: VectorStoreSchemaMetadata;
+    let records: StoredRecord[];
 
-    // Validate each record and detect the first record's embedding dimension
-    let expectedDim: number | undefined;
-    const records: StoredRecord[] = [];
+    if (parsed && typeof parsed === 'object' && '_meta' in parsed) {
+      // New format with schema metadata
+      const typed = parsed as SerializableStore;
+      
+      if (!typed._meta || !Array.isArray(typed.records)) {
+        throw new VectorStoreError('Corrupt store: invalid schema structure');
+      }
 
-    for (let i = 0; i < parsed.length; i++) {
-      const item = parsed[i] as Record<string, unknown>;
-      if (!item || typeof item !== 'object' || !('id' in item) || !('embedding' in item)) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} is missing required fields`,
-        );
+      meta = {
+        version: typed._meta.version,
+        embeddingDimension: typed._meta.embeddingDimension,
+        embeddingModel: typed._meta.embeddingModel,
+        encodingFormat: typed._meta.encodingFormat,
+        createdAt: new Date(typed._meta.createdAt),
+        updatedAt: new Date(typed._meta.updatedAt),
+      };
+      records = typed.records;
+    } else {
+      // Legacy format - array only
+      if (!Array.isArray(parsed)) {
+        throw new VectorStoreError('Corrupt store: expected array or wrapped object');
       }
-      const embedding = item.embedding as number[];
-      if (!Array.isArray(embedding)) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} has non-array embedding`,
-        );
+
+      if (parsed.length === 0) {
+        throw new VectorStoreError('Cannot determine dimension from empty store');
       }
-      if (expectedDim === undefined) {
-        expectedDim = embedding.length;
-      } else if (embedding.length !== expectedDim) {
-        throw new VectorStoreError(
-          `Corrupt store: record ${i} has dimension ${embedding.length}, expected ${expectedDim}`,
-        );
-      }
-      records.push({
-        id: item.id as string,
-        embedding,
-        metadata: (item.metadata as Metadata) ?? {},
+
+      const firstDim = Array.isArray(parsed[0]?.embedding) 
+        ? (parsed[0].embedding as number[]).length 
+        : 0;
+
+      meta = {
+        version: 0, // Legacy version marker
+        embeddingDimension: firstDim,
+        embeddingModel: 'legacy-format',
+        encodingFormat: 'float32',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      records = parsed.map((item, i) => {
+        const obj = item as Record<string, unknown>;
+        if (!obj || typeof obj !== 'object' || !('id' in obj) || !('embedding' in obj)) {
+          throw new VectorStoreError(
+            `Corrupt store: record ${i} is missing required fields`,
+          );
+        }
+        const embedding = obj.embedding as number[];
+        if (!Array.isArray(embedding)) {
+          throw new VectorStoreError(
+            `Corrupt store: record ${i} has non-array embedding`,
+          );
+        }
+        return {
+          id: obj.id as string,
+          embedding,
+          metadata: (obj.metadata as Metadata) ?? {},
+        };
       });
+
+      console.warn(
+        'Loaded legacy format store (v%d). Call save() to upgrade with schema metadata.',
+        meta.version,
+      );
     }
 
+    // Validate all records match schema
+    for (let i = 0; i < records.length; i++) {
+      const embLen = records[i].embedding.length;
+      if (embLen !== meta.embeddingDimension) {
+        throw new VectorStoreError(
+          `Record ${i} has wrong dimension: ${embLen} (expected ${meta.embeddingDimension}).\n` +
+          'This may indicate file corruption or manual editing.'
+        );
+      }
+    }
+
+    this._metadata = meta;
     this.records = records;
   }
 
