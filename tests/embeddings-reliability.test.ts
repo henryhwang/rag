@@ -4,23 +4,11 @@
 // Tests retry logic, timeout handling, and error metadata in embeddings
 // ============================================================
 
-import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { OpenAICompatibleEmbeddings } from '../src/embeddings/openai-compatible.ts';
 import { EmbeddingError } from '../src/errors/index.ts';
 
 describe('OpenAICompatibleEmbeddings - Reliability', () => {
-  let embeddings: OpenAICompatibleEmbeddings;
-
-  beforeEach(() => {
-    embeddings = new OpenAICompatibleEmbeddings({
-      apiKey: 'test-key',
-      baseURL: 'https://api.test.com/v1',
-      model: 'test-model',
-      dimensions: 1024,
-      maxRetries: 3,
-      timeout: 5000, // 5 seconds for testing
-    });
-  });
 
   describe('Timeout Configuration', () => {
     it('should use default timeout when not specified', () => {
@@ -29,7 +17,7 @@ describe('OpenAICompatibleEmbeddings - Reliability', () => {
       });
       
       // Verify timeout is set (private field, check via config)
-      expect(embeddings).toBeDefined();
+      expect(defaultEmbeddings).toBeDefined();
     });
 
     it('should accept custom timeout', () => {
@@ -113,7 +101,7 @@ describe('OpenAICompatibleEmbeddings - Reliability', () => {
         expect.unreachable();
       } catch (error) {
         // Check that error contains useful info
-        expect(error.message.length).toBeGreaterThan(0);
+        expect((error as Error).message.length).toBeGreaterThan(0);
       }
     });
 
@@ -129,7 +117,7 @@ describe('OpenAICompatibleEmbeddings - Reliability', () => {
         expect.unreachable();
       } catch (error) {
         // Error should mention we were trying to embed items
-        expect(error.message).toBeTruthy();
+        expect((error as Error).message).toBeTruthy();
       }
     });
 
@@ -152,7 +140,7 @@ describe('OpenAICompatibleEmbeddings - Reliability', () => {
   describe('Configuration Validation', () => {
     it('should require API key', () => {
       expect(() => {
-        const noKey = new OpenAICompatibleEmbeddings({});
+        new OpenAICompatibleEmbeddings({});
         // Constructor doesn't throw, but embed() will
       }).not.toThrow();
     });

@@ -7,6 +7,7 @@ import {
   MarkdownParser,
   resolveParser,
   parseFile,
+  getAvailableParsers,
 } from "../src/parsers/index.ts";
 import { ParseError } from "../src/errors/index.ts";
 
@@ -151,6 +152,29 @@ describe("parseFile", () => {
 
   it("should throw for unsupported extensions", async () => {
     await expect(parseFile("/path/to/file.xyz")).rejects.toThrow(ParseError);
+  });
+});
+
+// ============================================================
+// getAvailableParsers - error handling
+// ============================================================
+
+describe("getAvailableParsers", () => {
+  it("should return parsers without crashing when optional deps missing", () => {
+    // Should not crash, should have at least text/markdown parsers
+    const parsers = getAvailableParsers();
+    expect(Array.isArray(parsers)).toBe(true);
+    expect(parsers.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("should include TextParser and MarkdownParser by default", () => {
+    const parsers = getAvailableParsers();
+    
+    const hasText = parsers.some((p) => p.constructor.name === 'TextParser');
+    const hasMarkdown = parsers.some((p) => p.constructor.name === 'MarkdownParser');
+    
+    expect(hasText).toBe(true);
+    expect(hasMarkdown).toBe(true);
   });
 });
 

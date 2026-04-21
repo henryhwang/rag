@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { QueryEngine, QueryEngineConfig } from '../src/query/engine.js';
 import { BM25Index } from '../src/search/bm25.js';
 import { NoopLogger } from '../src/logger/index.js';
@@ -8,6 +8,7 @@ import type { EmbeddingProvider, VectorStore, Metadata, SearchResult } from '../
 
 class MockEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = 4;
+  readonly encodingFormat = 'float';
 
   async embed(texts: string[]): Promise<number[][]> {
     // Simple hash-based mock embedding
@@ -30,6 +31,7 @@ class MockEmbeddingProvider implements EmbeddingProvider {
 }
 
 class MockVectorStore implements VectorStore {
+  readonly metadata = null;
   private records: Array<{ id: string; embedding: number[]; metadata: Metadata }> = [];
 
   async add(embeddings: number[][], metadatas: Metadata[], ids?: string[]): Promise<void> {
@@ -60,8 +62,8 @@ class MockVectorStore implements VectorStore {
     this.records = this.records.filter((r) => !idSet.has(r.id));
   }
 
-  async save(): Promise<void> {}
-  async load(): Promise<void> {}
+  async save(): Promise<void> { }
+  async load(): Promise<void> { }
 
   get size(): number {
     return this.records.length;
@@ -94,8 +96,8 @@ function createTestEngine(overrides: Partial<QueryEngineConfig> = {}): QueryEngi
 
 describe('QueryEngine', () => {
   describe('dense search (default)', () => {
-    test('returns query results', async () => {
-      const engine = createTestEngine();
+    it('returns query results', async () => {
+      createTestEngine();
       // Add some documents
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
@@ -113,13 +115,13 @@ describe('QueryEngine', () => {
       expect(result.searchMode).toBe('dense');
     });
 
-    test('returns searchMode in result', async () => {
+    it('returns searchMode in result', async () => {
       const engine = createTestEngine();
       const result = await engine.query('test');
       expect(result.searchMode).toBe('dense');
     });
 
-    test('applies score threshold', async () => {
+    it('applies score threshold', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['hello world', 'foo bar'];
@@ -136,7 +138,7 @@ describe('QueryEngine', () => {
       expect(result.context.every((r) => r.score >= 0.99)).toBe(true);
     });
 
-    test('respects topK', async () => {
+    it('respects topK', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['one', 'two', 'three', 'four', 'five'];
@@ -154,7 +156,7 @@ describe('QueryEngine', () => {
   });
 
   describe('sparse search (BM25)', () => {
-    test('searches BM25 index when mode is sparse', async () => {
+    it('searches BM25 index when mode is sparse', async () => {
       const bm25 = new BM25Index();
       bm25.addDocuments([
         { id: 'c1', content: 'TypeScript is a typed language', metadata: { documentId: 'doc1', chunkIndex: 0 } },
@@ -167,14 +169,14 @@ describe('QueryEngine', () => {
       expect(result.searchMode).toBe('sparse');
     });
 
-    test('throws when BM25 index is not configured', async () => {
+    it('throws when BM25 index is not configured', async () => {
       const engine = createTestEngine();
       await expect(engine.query('test', { searchMode: 'sparse' })).rejects.toThrow(
         'BM25 index is required',
       );
     });
 
-    test('returns keyword-matching results', async () => {
+    it('returns keyword-matching results', async () => {
       const bm25 = new BM25Index();
       bm25.addDocuments([
         { id: 'c1', content: 'how to configure API endpoints', metadata: {} },
@@ -189,7 +191,7 @@ describe('QueryEngine', () => {
   });
 
   describe('hybrid search', () => {
-    test('combines dense and sparse results', async () => {
+    it('combines dense and sparse results', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['API configuration guide', 'database optimization tips'];
@@ -212,14 +214,14 @@ describe('QueryEngine', () => {
       expect(result.searchMode).toBe('hybrid');
     });
 
-    test('throws when BM25 index is not configured for hybrid', async () => {
+    it('throws when BM25 index is not configured for hybrid', async () => {
       const engine = createTestEngine();
       await expect(engine.query('test', { searchMode: 'hybrid' })).rejects.toThrow(
         'BM25 index is required',
       );
     });
 
-    test('respects denseWeight', async () => {
+    it('respects denseWeight', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['API config', 'database tips'];
@@ -247,7 +249,7 @@ describe('QueryEngine', () => {
   });
 
   describe('reranking', () => {
-    test('applies reranker when configured', async () => {
+    it('applies reranker when configured', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['hello world', 'foo bar baz'];
@@ -273,14 +275,14 @@ describe('QueryEngine', () => {
       expect(result.context[0].content).toContain('hello');
     });
 
-    test('skips reranking when reranker is not configured', async () => {
+    it('skips reranking when reranker is not configured', async () => {
       const engine = createTestEngine();
       // Should not throw even with rerank: true
       const result = await engine.query('test', { rerank: true });
       expect(result).toBeDefined();
     });
 
-    test('skips reranking for single result', async () => {
+    it('skips reranking for single result', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const embeds = await embeddings.embed(['single document']);
@@ -302,7 +304,7 @@ describe('QueryEngine', () => {
   });
 
   describe('query rewriting', () => {
-    test('applies query rewriter when configured', async () => {
+    it('applies query rewriter when configured', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['hello world', 'greetings earth'];
@@ -325,7 +327,7 @@ describe('QueryEngine', () => {
       expect(result.context.length).toBeGreaterThan(0);
     });
 
-    test('does not rewrite when rewriteQuery is false', async () => {
+    it('does not rewrite when rewriteQuery is false', async () => {
       let rewriteCalled = false;
       const mockRewriter = {
         name: 'MockRewriter',
@@ -342,7 +344,7 @@ describe('QueryEngine', () => {
   });
 
   describe('syncBM25', () => {
-    test('adds documents to BM25 index', () => {
+    it('adds documents to BM25 index', () => {
       const bm25 = new BM25Index();
       const engine = createTestEngine({ bm25 });
 
@@ -354,7 +356,7 @@ describe('QueryEngine', () => {
       expect(bm25.size).toBe(2);
     });
 
-    test('does nothing when BM25 is not configured', () => {
+    it('does nothing when BM25 is not configured', () => {
       const engine = createTestEngine();
       // Should not throw
       engine.syncBM25([{ id: '1', content: 'hello', metadata: {} }]);
@@ -362,7 +364,7 @@ describe('QueryEngine', () => {
   });
 
   describe('queryAndAnswer with Phase 3 options', () => {
-    test('answer is generated with rerank option', async () => {
+    it('answer is generated with rerank option', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['TypeScript is great'];
@@ -377,7 +379,7 @@ describe('QueryEngine', () => {
       };
       const mockLlm = {
         async generate(): Promise<string> { return 'answer'; },
-        async *stream(): AsyncIterable<string> {},
+        async *stream(): AsyncIterable<string> { },
       };
 
       const engine = createTestEngine({ vectorStore: vs, reranker: mockReranker as any });
@@ -386,7 +388,7 @@ describe('QueryEngine', () => {
       expect(result.context.length).toBeGreaterThan(0);
     });
 
-    test('answer is generated with rewriteQuery option', async () => {
+    it('answer is generated with rewriteQuery option', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
       const texts = ['hello world'];
@@ -403,7 +405,7 @@ describe('QueryEngine', () => {
       };
       const mockLlm = {
         async generate(): Promise<string> { return 'answer'; },
-        async *stream(): AsyncIterable<string> {},
+        async *stream(): AsyncIterable<string> { },
       };
 
       const engine = createTestEngine({ vectorStore: vs, queryRewriter: mockRewriter as any });
@@ -414,9 +416,8 @@ describe('QueryEngine', () => {
   });
 
   describe('rerank edge cases', () => {
-    test('reranker error is wrapped in RerankError', async () => {
+    it('reranker error is wrapped in RerankError', async () => {
       const vs = new MockVectorStore();
-      const embeddings = new MockEmbeddingProvider();
       await vs.add([[0.1, 0.2]], [{ content: 'doc' }], ['c1']);
       await vs.add([[0.3, 0.4]], [{ content: 'doc2' }], ['c2']);
 

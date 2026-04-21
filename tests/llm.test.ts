@@ -1,42 +1,61 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import {
   OpenAICompatibleLLM,
 } from "../src/llm/index.ts";
 import { LLMError } from "../src/errors/index.ts";
+import { createMockFetch, createMockFetchError, createMockStreamingFetch } from "./helpers/mock-fetch.ts";
 
-// --- Mock fetch ---
+// --- Shared error-case tests for generate/generateMessages ---
 
-function mockFetch(status: number, body: unknown) {
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify(body), { status });
-}
+type LLMMethod = "generate" | "generateMessages";
 
-function mockFetchError(err: Error) {
-  globalThis.fetch = async () => {
-    throw err;
-  };
-}
+function sharedErrorTests(methodName: LLMMethod) {
+  const call = (llm: OpenAICompatibleLLM) =>
+    methodName === "generate"
+      ? llm.generate("hello")
+      : llm.generateMessages([{ role: "user", content: "hi" }]);
 
-function mockStreamingFetch(chunks: string[]) {
-  // Simulate SSE stream
-  const sseData = chunks.map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}`).join("\n") + "\ndata: [DONE]\n";
-  const encoder = new TextEncoder();
-  globalThis.fetch = async () =>
-    new Response(new Blob([sseData]), {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
+  it("should throw if no API key", async () => {
+    const prev = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const llm = new OpenAICompatibleLLM();
+    await expect(call(llm)).rejects.toThrow(LLMError);
+    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+  });
+
+  it("should throw on API error", async () => {
+    const llm = new OpenAICompatibleLLM({
+      apiKey: "sk-test",
+      baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetch(500, { error: "Internal server error" }),
     });
+    await expect(call(llm)).rejects.toThrow(LLMError);
+  });
+
+  it("should throw on network error", async () => {
+    const llm = new OpenAICompatibleLLM({
+      apiKey: "sk-test",
+      baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetchError(new Error("ECONNREFUSED")),
+    });
+    await expect(call(llm)).rejects.toThrow(LLMError);
+  });
+
+  it("should throw on empty response", async () => {
+    const llm = new OpenAICompatibleLLM({
+      apiKey: "sk-test",
+      baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetch(200, { choices: [] }),
+    });
+    await expect(call(llm)).rejects.toThrow(LLMError);
+  });
 }
 
-function restoreFetch() {
-  // @ts-ignore
-  globalThis.fetch = undefined;
-}
+// --- Tests ---
 
 describe("OpenAICompatibleLLM — config", () => {
   it("should use default model", () => {
     const llm = new OpenAICompatibleLLM({ apiKey: "sk-test" });
-    // We can't inspect private model, but verify it constructs without error
     expect(llm).toBeDefined();
   });
 
@@ -51,82 +70,37 @@ describe("OpenAICompatibleLLM — config", () => {
 });
 
 describe("OpenAICompatibleLLM — generate", () => {
-  afterEach(() => restoreFetch());
-
-  it("should throw if no API key", async () => {
-    const prev = process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    const llm = new OpenAICompatibleLLM();
-    await expect(llm.generate("hello")).rejects.toThrow(LLMError);
-    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
-  });
+  sharedErrorTests("generate");
 
   it("should return content from a successful response", async () => {
-    mockFetch(200, {
-      choices: [{ message: { content: "The answer is 42." } }],
-    });
-
     const llm = new OpenAICompatibleLLM({
       apiKey: "sk-test",
       baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetch(200, {
+        choices: [{ message: { content: "The answer is 42." } }],
+      }),
     });
 
     const result = await llm.generate("What is the answer?");
     expect(result).toBe("The answer is 42.");
   });
-
-  it("should throw on empty response", async () => {
-    mockFetch(200, { choices: [] });
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(llm.generate("hello")).rejects.toThrow(LLMError);
-  });
-
-  it("should throw on API error", async () => {
-    mockFetch(500, { error: "Internal server error" });
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(llm.generate("hello")).rejects.toThrow(LLMError);
-  });
-
-  it("should throw on network error", async () => {
-    mockFetchError(new Error("ECONNREFUSED"));
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(llm.generate("hello")).rejects.toThrow(LLMError);
-  });
 });
 
 describe("OpenAICompatibleLLM — stream", () => {
-  afterEach(() => restoreFetch());
-
   it("should throw if no API key", async () => {
     const prev = process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_API_KEY;
     const llm = new OpenAICompatibleLLM();
     const iter = llm.stream("hello");
-    await expect(iter.next()).rejects.toThrow(LLMError);
+    await expect(iter[Symbol.asyncIterator]().next()).rejects.toThrow(LLMError);
     if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
   });
 
   it("should yield content chunks", async () => {
-    mockStreamingFetch(["Hello", ", ", "world!"]);
-
     const llm = new OpenAICompatibleLLM({
       apiKey: "sk-test",
       baseURL: "https://api.example.com/v1",
+      fetchFn: createMockStreamingFetch(["Hello", ", ", "world!"]),
     });
 
     const chunks: string[] = [];
@@ -144,24 +118,14 @@ describe("OpenAICompatibleLLM — stream", () => {
 
 describe("M7: LLM should accept empty string responses", () => {
   it("should not throw when generate() returns empty string", async () => {
-    const origFetch = globalThis.fetch;
-    try {
-      globalThis.fetch = async () =>
-        new Response(
-          JSON.stringify({ choices: [{ message: { content: "" } }] }),
-          { status: 200 }
-        );
+    const llm = new OpenAICompatibleLLM({
+      apiKey: "sk-test",
+      baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetch(200, { choices: [{ message: { content: "" } }] }),
+    });
 
-      const llm = new OpenAICompatibleLLM({
-        apiKey: "sk-test",
-        baseURL: "https://api.example.com/v1",
-      });
-
-      const result = await llm.generate("hi");
-      expect(result).toBe("");
-    } finally {
-      globalThis.fetch = origFetch;
-    }
+    const result = await llm.generate("hi");
+    expect(result).toBe("");
   });
 });
 
@@ -171,7 +135,7 @@ describe("M7: LLM should accept empty string responses", () => {
 
 describe("M8: LLM stream should handle SSE errors gracefully", () => {
   it("should have a catch block that skips malformed SSE chunks", async () => {
-    const source = await Bun.file("src/llm/openai-compatible.ts").text();
+    const source = await (globalThis as any).Bun.file("src/llm/openai-compatible.ts").text();
     // The stream method has a try/catch that skips malformed SSE chunks
     expect(source).toContain("Skip malformed SSE chunks");
   });
@@ -182,26 +146,15 @@ describe("M8: LLM stream should handle SSE errors gracefully", () => {
 // ============================================================
 
 describe("OpenAICompatibleLLM — generateMessages", () => {
-  afterEach(() => restoreFetch());
-
-  it("should throw if no API key", async () => {
-    const prev = process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    const llm = new OpenAICompatibleLLM();
-    await expect(
-      llm.generateMessages([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(LLMError);
-    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
-  });
+  sharedErrorTests("generateMessages");
 
   it("should return content from a successful response", async () => {
-    mockFetch(200, {
-      choices: [{ message: { content: "The answer is 42." } }],
-    });
-
     const llm = new OpenAICompatibleLLM({
       apiKey: "sk-test",
       baseURL: "https://api.example.com/v1",
+      fetchFn: createMockFetch(200, {
+        choices: [{ message: { content: "The answer is 42." } }],
+      }),
     });
 
     const result = await llm.generateMessages([
@@ -213,17 +166,16 @@ describe("OpenAICompatibleLLM — generateMessages", () => {
 
   it("should use options.model when provided", async () => {
     let capturedBody: string | undefined;
-    globalThis.fetch = async (_url: string, init: RequestInit) => {
-      capturedBody = init.body as string;
-      return new Response(
-        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
-        { status: 200 },
-      );
-    };
-
     const llm = new OpenAICompatibleLLM({
       apiKey: "sk-test",
       baseURL: "https://api.example.com/v1",
+      fetchFn: mock(async (_url: string, init?: RequestInit) => {
+        capturedBody = init?.body as string;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+          { status: 200 },
+        );
+      }),
     });
 
     await llm.generateMessages(
@@ -232,44 +184,5 @@ describe("OpenAICompatibleLLM — generateMessages", () => {
     );
 
     expect(capturedBody).toContain('"model":"custom-model"');
-  });
-
-  it("should throw on API error", async () => {
-    mockFetch(500, { error: "Internal server error" });
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(
-      llm.generateMessages([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(LLMError);
-  });
-
-  it("should throw on network error", async () => {
-    mockFetchError(new Error("ECONNREFUSED"));
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(
-      llm.generateMessages([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(LLMError);
-  });
-
-  it("should throw on empty response", async () => {
-    mockFetch(200, { choices: [] });
-
-    const llm = new OpenAICompatibleLLM({
-      apiKey: "sk-test",
-      baseURL: "https://api.example.com/v1",
-    });
-
-    await expect(
-      llm.generateMessages([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(LLMError);
   });
 });

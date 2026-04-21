@@ -52,7 +52,7 @@ describe('retryAsync', () => {
       expect(error).toBeInstanceOf(RetryError);
       expect((error as RetryError).getFinalError()).toBe(originalError);
       expect(attempts).toBe(3); // Initial + 2 retries
-      expect(error.message).toContain('3');
+      expect((error as Error).message).toContain('3');
     }
   });
 
@@ -155,7 +155,7 @@ describe('retryAsync', () => {
       }, { maxRetries: 2 });
       expect.unreachable();
     } catch (error) {
-      expect(error.message).toMatch(/\d+/); // Contains attempt number
+      expect((error as Error).message).toMatch(/\d+/); // Contains attempt number
     }
   });
 });
@@ -163,7 +163,7 @@ describe('retryAsync', () => {
 describe('RetryError', () => {
   it('should be instance of RAGError', () => {
     const cause = new Error('original');
-    const retryError = new RetryError('failed after 3 attempts', cause, 3);
+    const retryError = new RetryError('failed after 3 attempts', cause);
     
     expect(retryError).toBeInstanceOf(RAGError);
     expect(retryError.cause).toBe(cause);
@@ -171,13 +171,13 @@ describe('RetryError', () => {
 
   it('should expose final error via getter', () => {
     const cause = new Error('the real error');
-    const retryError = new RetryError('retry exhausted', cause, 5);
+    const retryError = new RetryError('retry exhausted', cause);
     
     expect(retryError.getFinalError()).toBe(cause);
   });
 
   it('should have correct name property', () => {
-    const retryError = new RetryError('msg', new Error('cause'), 1);
+    const retryError = new RetryError('msg', new Error('cause'));
     expect(retryError.name).toBe('RetryError');
   });
 });

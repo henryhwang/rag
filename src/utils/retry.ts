@@ -32,7 +32,6 @@ export class RetryError extends RAGError {
   constructor(
     message: string,
     private readonly lastError: Error,
-    private readonly attempts: number,
   ) {
     super(message);
     this.name = 'RetryError';
@@ -114,7 +113,6 @@ export async function retryAsync<T>(
         throw new RetryError(
           `Operation failed after ${attempt + 1} attempt(s): ${lastError.message}`,
           lastError,
-          attempt + 1,
         );
       }
 

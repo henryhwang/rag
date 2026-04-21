@@ -128,7 +128,7 @@ describe('RAG Schema Metadata & Validation', () => {
       });
       
       const filePath = path.join(tmpDir, 'store.json');
-      await creator.config.vectorStore.save(filePath);
+      await (creator as any).config.vectorStore.save(filePath);
       
       // Load with same config - should succeed
       const loader = new RAG({
@@ -157,7 +157,7 @@ describe('RAG Schema Metadata & Validation', () => {
       });
       
       const filePath = path.join(tmpDir, 'store.json');
-      await creator.config.vectorStore.save(filePath);
+      await (creator as any).config.vectorStore.save(filePath);
       
       // Load with different config - should fail
       const loader = new RAG({
@@ -180,7 +180,7 @@ describe('RAG Schema Metadata & Validation', () => {
       });
       
       const filePath = path.join(tmpDir, 'store.json');
-      await creator.config.vectorStore.save(filePath);
+      await (creator as any).config.vectorStore.save(filePath);
       
       const loader = new RAG({
         embeddings: new ConfigurableEmbeddings(1536),
@@ -367,7 +367,7 @@ describe('RAG Schema Metadata & Validation', () => {
       
       // The getter returns a reference, but users shouldn't mutate it
       // This is more of a documentation/convention note than enforceable
-      expect(meta.embeddingDimension).toBe(512);
+      expect(meta!.embeddingDimension).toBe(512);
     });
   });
 });

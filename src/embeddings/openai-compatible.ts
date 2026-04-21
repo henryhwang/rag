@@ -15,6 +15,7 @@ export interface OpenAICompatibleEmbeddingsConfig {
   encodingFormat?: string;
   timeout?: number;         // Request timeout in ms (default: 30000)
   maxRetries?: number;      // Max retry attempts (default: 3)
+  fetchFn?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 const DEFAULT_DIMENSIONS = 1024;
@@ -32,6 +33,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
   private readonly model: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
+  private readonly fetchFn: (url: string, init?: RequestInit) => Promise<Response>;
 
   constructor(config: OpenAICompatibleEmbeddingsConfig = {}) {
     this.apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? '';
@@ -41,6 +43,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
     this.encodingFormat = config.encodingFormat ?? DEFAULT_ENCODINGFORMAT;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -110,8 +113,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
       
       // Parse rate limit info from headers if available
       const retryAfter = response.headers.get('Retry-After');
-      const rateLimitReset = response.headers.get('X-RateLimit-Reset');
-      
+
       let troubleshooting = [
         `Check API key validity`,
         `Verify sufficient quota/credits for model: ${this.model}`,
@@ -129,7 +131,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
         `Embeddings API returned HTTP ${response.status}${bodyText ? ':\n' + bodyText.substring(0, 200) : ''}.\n` +
         `Endpoint: ${url}\n` +
         `Troubleshooting:\n` +
-        `  \n`.split('\n').map((t, i) => t.startsWith('Troubleshoot') ? t : `  ${t}`).join('\n'),
+        `  \n`.split('\n').map((t) => t.startsWith('Troubleshoot') ? t : `  ${t}`).join('\n'),
         {
           metadata: {
             endpoint: url,
@@ -168,7 +170,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
     body: object,
     controller: AbortController
   ): Promise<{ response: Response }> {
-    const response = await fetch(url, {
+    const response = await this.fetchFn(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

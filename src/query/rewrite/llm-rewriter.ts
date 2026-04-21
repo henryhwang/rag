@@ -1,4 +1,5 @@
 import type { LLMProvider, QueryRewriter } from '../../types/index.ts';
+import { QueryError } from '../../errors/index.ts';
 
 export interface LLMQueryRewriterConfig {
   llm: LLMProvider;
@@ -21,13 +22,13 @@ export class LLMQueryRewriter implements QueryRewriter {
     this.model = config.model;
 
     if (this.numQueries < 1) {
-      throw new Error('numQueries must be at least 1');
+      throw new QueryError('numQueries must be at least 1');
     }
   }
 
   async rewrite(query: string): Promise<string[]> {
     if (!query.trim()) {
-      throw new Error('Query cannot be empty');
+      throw new QueryError('Query cannot be empty');
     }
 
     const additionalCount = Math.max(0, this.numQueries - 1);

@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 import { SQLiteVectorStore } from '../src/storage/sqlite.js';
 import { VectorStoreError } from '../src/errors/index.js';
 import * as fs from 'node:fs/promises';
@@ -11,7 +11,7 @@ describe('SQLiteVectorStore', () => {
   afterEach(async () => {
     try {
       if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true });
-    } catch {}
+    } catch { }
   });
 
   async function makeTmpDir(): Promise<string> {
@@ -20,23 +20,55 @@ describe('SQLiteVectorStore', () => {
   }
 
   describe('construction', () => {
-    test('creates in-memory database by default', () => {
+    it('creates in-memory database by default', () => {
       const store = new SQLiteVectorStore();
       expect(store.size).toBe(0);
       store.close();
     });
 
-    test('accepts custom url and tableName', async () => {
+    it('accepts custom url and tableName', async () => {
       const dir = await makeTmpDir();
       const dbPath = path.join(dir, 'test.db');
       const store = new SQLiteVectorStore({ url: `file:${dbPath}`, tableName: 'vectors' });
       expect(store.size).toBe(0);
       store.close();
     });
+
+    it('rejects table names with SQL injection attempts', () => {
+      expect(() => new SQLiteVectorStore({ tableName: 'embeddings; DROP TABLE users;--' }))
+        .toThrow('Invalid table name');
+    });
+
+    it('rejects table names with special characters', () => {
+      expect(() => new SQLiteVectorStore({ tableName: 'test; DELETE FROM' }))
+        .toThrow('Invalid table name');
+    });
+
+    it('rejects table names starting with numbers', () => {
+      expect(() => new SQLiteVectorStore({ tableName: '123table' }))
+        .toThrow('Invalid table name');
+    });
+
+    it('rejects table names with spaces', () => {
+      expect(() => new SQLiteVectorStore({ tableName: 'my table' }))
+        .toThrow('Invalid table name');
+    });
+
+    it('rejects table names with quotes', () => {
+      expect(() => new SQLiteVectorStore({ tableName: "test'table" }))
+        .toThrow('Invalid table name');
+    });
+
+    it('accepts valid table names', () => {
+      expect(() => new SQLiteVectorStore({ tableName: 'embeddings' })).not.toThrow();
+      expect(() => new SQLiteVectorStore({ tableName: 'my_table_123' })).not.toThrow();
+      expect(() => new SQLiteVectorStore({ tableName: '_test' })).not.toThrow();
+      expect(() => new SQLiteVectorStore({ tableName: 'TestTable' })).not.toThrow();
+    });
   });
 
   describe('add', () => {
-    test('adds records and reports correct size', async () => {
+    it('adds records and reports correct size', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
@@ -47,7 +79,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('auto-generates IDs when not provided', async () => {
+    it('auto-generates IDs when not provided', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[0.1, 0.2, 0.3]],
@@ -57,7 +89,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('throws if embeddings and metadatas length mismatch', async () => {
+    it('throws if embeddings and metadatas length mismatch', async () => {
       const store = new SQLiteVectorStore();
       await expect(
         store.add([[0.1, 0.2]], [{ content: 'a' }, { content: 'b' }]),
@@ -65,7 +97,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('rejects inconsistent embedding dimensions', async () => {
+    it('rejects inconsistent embedding dimensions', async () => {
       const store = new SQLiteVectorStore();
       await expect(
         store.add(
@@ -76,7 +108,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('rejects dimension mismatch with existing records', async () => {
+    it('rejects dimension mismatch with existing records', async () => {
       const store = new SQLiteVectorStore();
       await store.add([[0.1, 0.2]], [{ content: 'a' }], ['id1']);
       await expect(
@@ -87,7 +119,7 @@ describe('SQLiteVectorStore', () => {
   });
 
   describe('search', () => {
-    test('returns results sorted by cosine similarity', async () => {
+    it('returns results sorted by cosine similarity', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[0.9, 0.1, 0.0], [0.1, 0.9, 0.0], [0.5, 0.5, 0.0]],
@@ -102,7 +134,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('respects limit', async () => {
+    it('respects limit', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]],
@@ -115,7 +147,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('filters by metadata', async () => {
+    it('filters by metadata', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
@@ -133,7 +165,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('returns 0 similarity for orthogonal vectors', async () => {
+    it('returns 0 similarity for orthogonal vectors', async () => {
       const store = new SQLiteVectorStore();
       await store.add(
         [[1, 0], [0, 1]],
@@ -149,7 +181,7 @@ describe('SQLiteVectorStore', () => {
   });
 
   describe('delete', () => {
-    test('removes records by ID', async () => {
+    it('removes records by ID', async () => {
       const store = new SQLiteVectorStore();
       await store.add([[0.1, 0.2]], [{ content: 'a' }], ['id1']);
       expect(store.size).toBe(1);
@@ -158,7 +190,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('is a no-op for non-existent IDs', async () => {
+    it('is a no-op for non-existent IDs', async () => {
       const store = new SQLiteVectorStore();
       await store.add([[0.1, 0.2]], [{ content: 'a' }], ['id1']);
       await store.delete(['nonexistent']);
@@ -168,7 +200,7 @@ describe('SQLiteVectorStore', () => {
   });
 
   describe('persistence', () => {
-    test('save and load records from disk', async () => {
+    it('save and load records from disk', async () => {
       const dir = await makeTmpDir();
       const dbPath = path.join(dir, 'test.db');
       const store = new SQLiteVectorStore({ url: `file:${dbPath}` });
@@ -188,7 +220,7 @@ describe('SQLiteVectorStore', () => {
       store2.close();
     });
 
-    test('save exports JSON file', async () => {
+    it('save exports JSON file', async () => {
       const store = new SQLiteVectorStore();
       await store.add([[0.1, 0.2]], [{ content: 'hello' }], ['id1']);
 
@@ -204,7 +236,7 @@ describe('SQLiteVectorStore', () => {
       expect(data.records[0].id).toBe('id1');
     });
 
-    test('load from JSON file', async () => {
+    it('load from JSON file', async () => {
       const dir = await makeTmpDir();
       const dbPath = path.join(dir, 'test.db');
       const jsonPath = path.join(dir, 'export.json');
@@ -218,7 +250,7 @@ describe('SQLiteVectorStore', () => {
       store.close();
     });
 
-    test('load throws on corrupt JSON', async () => {
+    it('load throws on corrupt JSON', async () => {
       const dir = await makeTmpDir();
       const jsonPath = path.join(dir, 'bad.json');
       await fs.writeFile(jsonPath, 'not json');
@@ -230,7 +262,7 @@ describe('SQLiteVectorStore', () => {
   });
 
   describe('close', () => {
-    test('closes client and resets state', async () => {
+    it('closes client and resets state', async () => {
       const store = new SQLiteVectorStore();
       await store.add([[0.1, 0.2]], [{ content: 'a' }], ['1']);
       expect(store.size).toBe(1);
@@ -243,6 +275,78 @@ describe('SQLiteVectorStore', () => {
       await store2.add([[0.1, 0.2]], [{ content: 'a' }], ['1']);
       expect(store2.size).toBe(1);
       store2.close();
+    });
+  });
+
+  describe('transactional behavior', () => {
+    it('add operation maintains data consistency on success', async () => {
+      const store = new SQLiteVectorStore();
+
+      // Add multiple records
+      await store.add(
+        [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+        [{ content: 'a' }, { content: 'b' }, { content: 'c' }],
+        ['id1', 'id2', 'id3'],
+      );
+
+      expect(store.size).toBe(3);
+
+      // Verify all records are searchable
+      const results = await store.search([0.1, 0.2], 10);
+      expect(results).toHaveLength(3);
+
+      store.close();
+    });
+
+    it('delete operation maintains data consistency', async () => {
+      const store = new SQLiteVectorStore();
+      await store.add(
+        [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+        [{ content: 'a' }, { content: 'b' }, { content: 'c' }],
+        ['id1', 'id2', 'id3'],
+      );
+
+      // Delete multiple records
+      await store.delete(['id1', 'id2']);
+
+      expect(store.size).toBe(1);
+
+      const results = await store.search([0.1, 0.2], 10);
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('id3');
+
+      store.close();
+    });
+
+    it('load operation replaces all records atomically', async () => {
+      const store = new SQLiteVectorStore();
+
+      // Add initial records
+      await store.add(
+        [[0.1, 0.2]],
+        [{ content: 'old' }],
+        ['old1'],
+      );
+      expect(store.size).toBe(1);
+
+      // Create temp JSON file with new data
+      const dir = await makeTmpDir();
+      const jsonPath = path.join(dir, 'export.json');
+      await fs.writeFile(jsonPath, JSON.stringify([
+        { id: 'new1', embedding: [0.9, 0.1], metadata: { content: 'new1' } },
+        { id: 'new2', embedding: [0.8, 0.2], metadata: { content: 'new2' } },
+      ]));
+
+      // Load should replace all records
+      await store.load(jsonPath);
+
+      expect(store.size).toBe(2);
+
+      const results = await store.search([0.9, 0.1], 10);
+      expect(results).toHaveLength(2);
+      expect(results[0].id).toBe('new1');
+
+      store.close();
     });
   });
 });

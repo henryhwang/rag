@@ -14,6 +14,7 @@ export interface OpenAICompatibleLLMConfig {
   model?: string;
   timeout?: number;         // Request timeout in ms (default: 30000)
   maxRetries?: number;      // Max retry attempts (default: 3)
+  fetchFn?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 const DEFAULT_MODEL = 'gpt-4o-mini';
@@ -27,6 +28,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
   private readonly model: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
+  private readonly fetchFn: (url: string, init?: RequestInit) => Promise<Response>;
 
   constructor(config: OpenAICompatibleLLMConfig = {}) {
     this.apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? '';
@@ -34,6 +36,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
     this.model = config.model ?? DEFAULT_MODEL;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 
   async generate(prompt: string, options?: LLMOptions): Promise<string> {
@@ -64,7 +67,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
 
       try {
         const result = await retryAsync(
-          () => fetch(url, {
+          () => this.fetchFn(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -166,7 +169,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
 
       try {
         const result = await retryAsync(
-          () => fetch(url, {
+          () => this.fetchFn(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -237,7 +240,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
 
       try {
         const result = await retryAsync(
-          () => fetch(url, {
+          () => this.fetchFn(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

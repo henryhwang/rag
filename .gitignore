@@ -45,3 +45,6 @@ schema-test-*.json
 # AI assistant artifacts
 .qwen/
 .history/
+
+# SQLite vector store database (generated)
+*.db

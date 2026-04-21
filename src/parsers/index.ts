@@ -22,8 +22,9 @@ let pdfParser: import('./pdf.ts').PdfParser | undefined;
  * Get all available parsers including optional ones.
  * Optional parsers are loaded lazily so missing peer deps
  * don't break core functionality.
+ * Exported for testing.
  */
-function getAvailableParsers(): BaseDocumentParser[] {
+export function getAvailableParsers(): BaseDocumentParser[] {
   const parsers = [...BUILTIN_PARSERS];
 
   try {
@@ -33,7 +34,12 @@ function getAvailableParsers(): BaseDocumentParser[] {
       docxParser = new DocxParser();
     }
     parsers.push(docxParser!);
-  } catch { /* mammoth not installed */ }
+  } catch (err: any) {
+    // Only silently skip if the module is not installed
+    // Re-throw all other errors (syntax errors, missing exports, etc.)
+    if (err?.code !== 'MODULE_NOT_FOUND') throw err;
+    // mammoth not installed — skip silently
+  }
 
   try {
     if (!pdfParser) {
@@ -41,7 +47,12 @@ function getAvailableParsers(): BaseDocumentParser[] {
       pdfParser = new PdfParser();
     }
     parsers.push(pdfParser!);
-  } catch { /* pdf-parse not installed */ }
+  } catch (err: any) {
+    // Only silently skip if the module is not installed
+    // Re-throw all other errors (syntax errors, missing exports, etc.)
+    if (err?.code !== 'MODULE_NOT_FOUND') throw err;
+    // pdf-parse not installed — skip silently
+  }
 
   return parsers;
 }

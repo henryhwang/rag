@@ -9,19 +9,16 @@ import {
   QueryResult,
   QueryWithAnswer,
   QueryOptions,
-  SearchResult,
   Logger,
-  LLMProvider,
   Reranker,
   QueryRewriter,
-  VectorStoreSchemaMetadata,
 } from '../types/index.ts';
-import { DEFAULT_CHUNK_OPTIONS, DEFAULT_SEARCH_OPTIONS } from '../types/index.ts';
-import { parseFile, resolveParser } from '../parsers/index.ts';
+import { DEFAULT_CHUNK_OPTIONS } from '../types/index.ts';
+import { resolveParser } from '../parsers/index.ts';
 import { chunkText } from '../chunking/index.ts';
 import { QueryEngine, QueryEngineConfig } from '../query/index.ts';
 import { createDocumentInfo } from './utils.ts';
-import { NoopLogger, Logger as LoggerType } from '../logger/index.ts';
+import { NoopLogger } from '../logger/index.ts';
 import { RAGError } from '../errors/index.ts';
 import { BM25Index } from '../search/index.ts';
 import * as path from 'node:path';
@@ -67,7 +64,7 @@ export class RAG {
     if (this.filePaths.has(pathStr)) {
       this.logger.debug('Skipping duplicate document: %s', pathStr);
       // Return the existing document
-      for (const [id, doc] of this.documents) {
+      for (const [, doc] of this.documents) {
         // Match by pathStr or by fileName (for cases where path differs)
         if (doc.fileName === pathStr) return doc;
         // Also match by checking if the basename is the same
@@ -222,24 +219,24 @@ export class RAG {
    * Validate that configured EmbeddingProvider matches what's in the vector store.
    * Call this after loading a persisted store to catch configuration drift early.
    */
-  async validateConfiguration(): Promise<{ 
-    isValid: boolean; 
-    warning?: string; 
-    error?: string; 
+  async validateConfiguration(): Promise<{
+    isValid: boolean;
+    warning?: string;
+    error?: string;
   }> {
     const storeMeta = this.config.vectorStore.metadata;
     const providerDim = this.config.embeddings.dimensions;
 
     if (!storeMeta) {
-      return { 
-        isValid: true, 
+      return {
+        isValid: true,
         warning: 'Vector store has no metadata (empty or legacy). Configuration cannot be validated.',
       };
     }
 
     if (storeMeta.embeddingDimension === 0) {
-      return { 
-        isValid: true, 
+      return {
+        isValid: true,
         warning: 'Vector store dimension not yet set (first add will initialize).',
       };
     }
@@ -322,6 +319,32 @@ This will cause search to fail! To fix:
       createdAt: meta?.createdAt,
       updatedAt: meta?.updatedAt,
     };
+  }
+
+  /**
+   * Initialize the vector store if it supports explicit initialization.
+   * Useful for SQLiteVectorStore to load data before querying.
+   * No-op for stores that don't require initialization (e.g., InMemoryVectorStore).
+   */
+  async initialize(): Promise<void> {
+    const init = this.config.vectorStore.init;
+    if (typeof init === 'function') {
+      await init.call(this.config.vectorStore);
+      this.logger.debug('Vector store initialized');
+    }
+  }
+
+  /**
+   * Close the vector store and release resources.
+   * For SQLiteVectorStore, this closes database connections.
+   * No-op for stores without cleanup requirements.
+   */
+  close(): void {
+    const close = this.config.vectorStore.close;
+    if (typeof close === 'function') {
+      close.call(this.config.vectorStore);
+      this.logger.debug('Vector store closed');
+    }
   }
 
   // -- Private helpers ------------------------------------------------

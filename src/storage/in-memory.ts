@@ -3,14 +3,21 @@
 // No dependencies, suitable for prototyping and testing.
 // ============================================================
 
-import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata } from '../types/index.ts';
+import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
+import { NoopLogger } from '../logger/index.ts';
 import * as fs from 'node:fs/promises';
 
 interface StoredRecord {
   id: string;
   embedding: number[];
   metadata: Metadata;
+}
+
+/** Configuration for InMemoryVectorStore */
+export interface InMemoryVectorStoreConfig {
+  /** Optional logger for warnings and diagnostics */
+  logger?: Logger;
 }
 
 /** Serializable format with embedded schema metadata */
@@ -25,6 +32,11 @@ interface SerializableStore {
 export class InMemoryVectorStore implements VectorStore {
   private records: StoredRecord[] = [];
   private _metadata: VectorStoreSchemaMetadata | null = null;
+  private readonly logger: Logger;
+
+  constructor(config?: InMemoryVectorStoreConfig) {
+    this.logger = config?.logger ?? new NoopLogger();
+  }
 
   /** Schema metadata - read-only access */
   get metadata(): VectorStoreSchemaMetadata | null {
@@ -251,9 +263,8 @@ export class InMemoryVectorStore implements VectorStore {
         };
       });
 
-      console.warn(
-        'Loaded legacy format store (v%d). Call save() to upgrade with schema metadata.',
-        meta.version,
+      this.logger.warn(
+        `Loaded legacy format store (v${meta.version}). Call save() to upgrade with schema metadata.`,
       );
     }
 

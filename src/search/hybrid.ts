@@ -5,7 +5,6 @@
 
 import { SearchResult, Metadata } from '../types/index.ts';
 import { BM25Index, BM25SearchResult, BM25Document } from './bm25.ts';
-import { SearchError } from '../errors/index.ts';
 
 export interface HybridSearchConfig {
   /** Weight for dense (vector) scores in the fusion, 0–1. Default: 0.5. */

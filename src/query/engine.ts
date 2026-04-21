@@ -10,6 +10,7 @@ import type {
   VectorStore,
   SearchResult,
   SearchOptions,
+  QueryOptions,
   QueryResult,
   QueryWithAnswer,
   LLMProvider,
@@ -18,7 +19,7 @@ import type {
   QueryRewriter,
   Metadata,
 } from '../types/index.ts';
-import { DEFAULT_SEARCH_OPTIONS, DEFAULT_HYBRID_CONFIG } from '../types/index.ts';
+import { DEFAULT_SEARCH_OPTIONS } from '../types/index.ts';
 import { QueryError, RerankError } from '../errors/index.ts';
 import {
   BM25Index,
@@ -69,7 +70,7 @@ export class QueryEngine {
   /**
    * Retrieve relevant chunks for a question.
    */
-  async query(question: string, options?: SearchOptions): Promise<QueryResult> {
+  async query(question: string, options?: QueryOptions): Promise<QueryResult> {
     const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
     const searchMode = opts.searchMode ?? 'dense';
 
@@ -88,9 +89,8 @@ export class QueryEngine {
     }
 
     // Apply reranking if configured
-    const queryOpts = opts as SearchOptions & { rerank?: boolean; rerankTopK?: number };
-    if (queryOpts.rerank && this.reranker && results.length > 1) {
-      results = await this.rerankResults(question, results, queryOpts);
+    if (opts.rerank && this.reranker && results.length > 1) {
+      results = await this.rerankResults(question, results, opts);
     }
 
     this.logger.debug(
@@ -107,7 +107,7 @@ export class QueryEngine {
   async queryAndAnswer(
     question: string,
     llm: LLMProvider,
-    options?: SearchOptions & { systemPrompt?: string },
+    options?: QueryOptions,
   ): Promise<QueryWithAnswer> {
     const result = await this.query(question, options);
 
@@ -270,7 +270,7 @@ export class QueryEngine {
   private async rerankResults(
     query: string,
     results: SearchResult[],
-    opts: SearchOptions,
+    opts: QueryOptions,
   ): Promise<SearchResult[]> {
     if (!this.reranker) return results;
 
@@ -308,13 +308,9 @@ export class QueryEngine {
 
   private async getQueries(
     originalQuery: string,
-    opts: SearchOptions,
+    opts: QueryOptions,
   ): Promise<string[]> {
-    // Note: rewriteQuery is on SearchOptions via QueryOptions extension
-    const queryOpts = opts as SearchOptions & { rewriteQuery?: boolean };
-
-    if (queryOpts.rewriteQuery && this.queryRewriter) {
-      this.logger.debug('Rewriting query: %s', originalQuery);
+    if (opts.rewriteQuery && this.queryRewriter) {
       const rewritten = await this.queryRewriter.rewrite(originalQuery);
       this.logger.debug('Rewritten to %d queries: %j', rewritten.length, rewritten);
       return rewritten;

@@ -67,11 +67,21 @@ export interface VectorStore {
   delete(ids: string[]): Promise<void>;
   save(path: string): Promise<void>;
   load(path: string): Promise<void>;
+  /**
+   * Optional initialization method for stores that need explicit setup.
+   * For SQLite stores, this loads data from disk into memory cache.
+   * No-op for in-memory stores or already-initialized stores.
+   */
+  init?(): Promise<void>;
+  /**
+   * Optional cleanup method for stores with resources to release.
+   * For SQLite stores, this closes database connections.
+   * No-op for stores without external resources.
+   */
+  close?(): void;
 }
 
-// -- Parser -----------------------------------------------------------
-
-export interface DocumentParser<T = string> {
+export interface DocumentParser {
   supportedExtensions: string[];
   parse(file: FileInput): Promise<ParsedDocument>;
 }
@@ -246,14 +256,8 @@ export interface RAGConfig {
   vectorStore: VectorStore;
   chunking?: Partial<ChunkOptions>;
   logger?: Logger;
-  /** Request timeout in milliseconds (default: 30000) */
-  timeout?: number;
   /** Retry configuration for network operations */
   retry?: RetryConfig;
-  /** Maximum concurrent requests (optional rate limiting) */
-  maxConcurrency?: number;
-  /** Whether to gracefully degrade when optional features unavailable */
-  fallbackOnMissingFeature?: boolean;
 }
 
 // -- Logger -----------------------------------------------------------

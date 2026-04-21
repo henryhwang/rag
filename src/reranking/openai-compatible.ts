@@ -18,9 +18,11 @@ export interface OpenAICompatibleRerankerConfig {
   timeout?: number;
   /** Max retry attempts (default: 3) */
   maxRetries?: number;
+  /** Custom fetch function (default: globalThis.fetch) */
+  fetchFn?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
-const DEFAULT_CONFIG: Required<Omit<OpenAICompatibleRerankerConfig, 'apiKey'>> & { apiKey: '' } = {
+const DEFAULT_CONFIG: Required<Omit<OpenAICompatibleRerankerConfig, 'apiKey' | 'fetchFn'>> & { apiKey: '' } = {
   apiKey: '',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
@@ -44,6 +46,7 @@ export class OpenAICompatibleReranker implements Reranker {
   private readonly batchSize: number;
   private readonly timeout: number;
   private readonly maxRetries: number;
+  private readonly fetchFn: (url: string, init?: RequestInit) => Promise<Response>;
 
   constructor(config?: OpenAICompatibleRerankerConfig) {
     // Merge defaults with user config
@@ -58,9 +61,15 @@ export class OpenAICompatibleReranker implements Reranker {
     this.batchSize = merged.batchSize;
     this.timeout = merged.timeout;
     this.maxRetries = merged.maxRetries;
+    this.fetchFn = config?.fetchFn ?? globalThis.fetch;
   }
 
   async rerank(query: string, documents: string[]): Promise<number[]> {
+    if (!this.apiKey) {
+      throw new RerankError(
+        'API key is required for reranking. Provide apiKey in config or set RERANKER_API_KEY env var.',
+      );
+    }
     if (!query.trim()) {
       throw new RerankError('Query cannot be empty');
     }
@@ -134,7 +143,7 @@ export class OpenAICompatibleReranker implements Reranker {
 
       try {
         const result = await retryAsync(
-          () => fetch(url, {
+          () => this.fetchFn(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),

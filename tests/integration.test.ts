@@ -6,9 +6,6 @@ import { RAG } from "../src/core/RAG.ts";
 import { InMemoryVectorStore } from "../src/storage/index.ts";
 import type {
   EmbeddingProvider,
-  Metadata,
-  Filter,
-  SearchResult,
   LLMProvider,
   LLMOptions,
 } from "../src/types/index.ts";
@@ -21,6 +18,7 @@ import { NoopLogger } from "../src/logger/index.ts";
 /** Embedding provider that returns deterministic, predictable vectors. */
 class MockEmbeddings implements EmbeddingProvider {
   readonly dimensions = 4;
+  readonly encodingFormat = 'float';
 
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((t) => {

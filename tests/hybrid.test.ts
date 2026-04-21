@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { fuseResults, reciprocalRankFusion, DEFAULT_HYBRID_CONFIG } from '../src/search/hybrid.js';
 import { SearchResult } from '../src/types/index.js';
 import { BM25SearchResult } from '../src/search/bm25.js';
@@ -19,7 +19,7 @@ describe('Hybrid Search Fusion', () => {
   ];
 
   describe('fuseResults', () => {
-    test('combines dense and sparse results', () => {
+    it('combines dense and sparse results', () => {
       const fused = fuseResults(denseResults, sparseResults, DEFAULT_HYBRID_CONFIG, 5);
       expect(fused.length).toBeGreaterThan(0);
       // All unique ids from both sets should be present
@@ -29,19 +29,19 @@ describe('Hybrid Search Fusion', () => {
       expect(ids.has('2')).toBe(true); // from both
     });
 
-    test('respects limit', () => {
+    it('respects limit', () => {
       const fused = fuseResults(denseResults, sparseResults, DEFAULT_HYBRID_CONFIG, 2);
       expect(fused.length).toBeLessThanOrEqual(2);
     });
 
-    test('results sorted by score descending', () => {
+    it('results sorted by score descending', () => {
       const fused = fuseResults(denseResults, sparseResults, DEFAULT_HYBRID_CONFIG, 10);
       for (let i = 1; i < fused.length; i++) {
         expect(fused[i].score).toBeLessThanOrEqual(fused[i - 1].score);
       }
     });
 
-    test('favors dense with higher denseWeight', () => {
+    it('favors dense with higher denseWeight', () => {
       const denseFavoring = fuseResults(denseResults, sparseResults, { denseWeight: 0.9 }, 5);
       const sparseFavoring = fuseResults(denseResults, sparseResults, { denseWeight: 0.1 }, 5);
 
@@ -51,29 +51,29 @@ describe('Hybrid Search Fusion', () => {
       expect(denseFavoringPos).toBeLessThanOrEqual(sparseFavoringPos);
     });
 
-    test('equal weight by default', () => {
+    it('equal weight by default', () => {
       const fused = fuseResults(denseResults, sparseResults, { denseWeight: 0.5 }, 10);
       expect(fused.length).toBeGreaterThan(0);
     });
 
-    test('handles empty dense results', () => {
+    it('handles empty dense results', () => {
       const fused = fuseResults([], sparseResults, DEFAULT_HYBRID_CONFIG, 5);
       expect(fused.length).toBeLessThanOrEqual(5);
       expect(fused.every((r) => ['2', '3', '4', '5'].includes(r.id))).toBe(true);
     });
 
-    test('handles empty sparse results', () => {
+    it('handles empty sparse results', () => {
       const fused = fuseResults(denseResults, [], DEFAULT_HYBRID_CONFIG, 5);
       expect(fused.length).toBeLessThanOrEqual(5);
       expect(fused.every((r) => ['1', '2', '3', '5'].includes(r.id))).toBe(true);
     });
 
-    test('handles both empty', () => {
+    it('handles both empty', () => {
       const fused = fuseResults([], [], DEFAULT_HYBRID_CONFIG, 5);
       expect(fused).toEqual([]);
     });
 
-    test('normalizes scores to 0-1 range', () => {
+    it('normalizes scores to 0-1 range', () => {
       const extremeDense: SearchResult[] = [
         { id: '1', content: 'doc 1', score: 1000, metadata: {} },
         { id: '2', content: 'doc 2', score: 0.001, metadata: {} },
@@ -86,7 +86,7 @@ describe('Hybrid Search Fusion', () => {
       }
     });
 
-    test('preserves content and metadata', () => {
+    it('preserves content and metadata', () => {
       const dense: SearchResult[] = [
         { id: '1', content: 'hello world', score: 0.9, metadata: { documentId: 'doc1', custom: true } },
       ];
@@ -98,7 +98,7 @@ describe('Hybrid Search Fusion', () => {
   });
 
   describe('reciprocalRankFusion', () => {
-    test('combines results using rank positions', () => {
+    it('combines results using rank positions', () => {
       const fused = reciprocalRankFusion(denseResults, sparseResults, 5);
       expect(fused.length).toBeGreaterThan(0);
       const ids = new Set(fused.map((r) => r.id));
@@ -106,25 +106,25 @@ describe('Hybrid Search Fusion', () => {
       expect(ids.has('4')).toBe(true);
     });
 
-    test('results sorted by RRF score descending', () => {
+    it('results sorted by RRF score descending', () => {
       const fused = reciprocalRankFusion(denseResults, sparseResults, 10);
       for (let i = 1; i < fused.length; i++) {
         expect(fused[i].score).toBeLessThanOrEqual(fused[i - 1].score);
       }
     });
 
-    test('respects limit', () => {
+    it('respects limit', () => {
       const fused = reciprocalRankFusion(denseResults, sparseResults, 2);
       expect(fused.length).toBeLessThanOrEqual(2);
     });
 
-    test('handles empty inputs', () => {
+    it('handles empty inputs', () => {
       expect(reciprocalRankFusion([], [], 5)).toEqual([]);
       expect(reciprocalRankFusion(denseResults, [], 5).length).toBeGreaterThan(0);
       expect(reciprocalRankFusion([], sparseResults, 5).length).toBeGreaterThan(0);
     });
 
-    test('k parameter affects score magnitude', () => {
+    it('k parameter affects score magnitude', () => {
       const fusedK10 = reciprocalRankFusion(denseResults, sparseResults, 10, 10);
       const fusedK100 = reciprocalRankFusion(denseResults, sparseResults, 10, 100);
       // With smaller k, rank differences matter more -> higher scores
@@ -133,7 +133,7 @@ describe('Hybrid Search Fusion', () => {
       }
     });
 
-    test('appearing in both lists boosts ranking', () => {
+    it('appearing in both lists boosts ranking', () => {
       const fused = reciprocalRankFusion(denseResults, sparseResults, 10);
       // Doc 2 and 3 appear in both lists, should generally rank higher than docs in only one
       const bothIds = ['2', '3'];

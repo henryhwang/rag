@@ -14,6 +14,7 @@ import type {
 
 class MockEmbeddings implements EmbeddingProvider {
   readonly dimensions = 3;
+  readonly encodingFormat = 'float';
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((t) => {
       // Deterministic mock: hash text to a vector
@@ -26,6 +27,7 @@ class MockEmbeddings implements EmbeddingProvider {
 // --- Mock VectorStore ---
 
 class MockVectorStore implements VectorStore {
+  readonly metadata = null;
   private results: SearchResult[] = [];
 
   setMockResults(results: SearchResult[]) {
@@ -238,6 +240,7 @@ describe("M4: query should handle empty embedding result", () => {
   it("should not crash when embed() returns an empty array", async () => {
     const emptyEmbeddings: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed() {
         return [];
       },
@@ -368,7 +371,7 @@ describe("L4: SearchResult.documentId should be required, not optional", () => {
 
 describe("L6: cosineSimilarity should handle edge cases without NaN", () => {
   it("should not produce NaN for near-zero-norm vectors", async () => {
-    const store = new MockVectorStore();
+    new MockVectorStore();
     // The mock uses a fixed score of 0.8, so we test the real store
     const realStore = new InMemoryVectorStore();
     await realStore.add(
@@ -379,6 +382,7 @@ describe("L6: cosineSimilarity should handle edge cases without NaN", () => {
 
     const embeddings: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed() {
         return [[1e-300, 1e-300, 1e-300]];
       },

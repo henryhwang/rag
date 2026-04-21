@@ -2,7 +2,7 @@
 // Chunking strategies — fixed, recursive, markdown-aware
 // ============================================================
 
-import { Chunk, ChunkOptions, Metadata } from '../types/index.ts';
+import { Chunk, ChunkOptions } from '../types/index.ts';
 import { ChunkingError } from '../errors/index.ts';
 import { v4 as uuidv4 } from 'uuid';
 

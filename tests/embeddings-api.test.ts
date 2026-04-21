@@ -2,15 +2,15 @@ import { describe, it, expect } from "bun:test";
 import { OpenAICompatibleEmbeddings } from "../src/embeddings/index.ts";
 import { EmbeddingError } from "../src/errors/index.ts";
 
-describe("embedding api access using fetch", () => {
-  const SKIP = !(process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL && process.env.OPENAI_MODEL);
+describe("embedding with BAAI/bge-m3 from siliconflow", () => {
+  const SKIP = !(process.env.EMBEDDING_API_KEY);
 
   // Note: Skip by default as these tests require live API access and can be slow/unreliable
-  it.skip("should call real api and get back embedding with dimension of 2048", async () => {
-    const baseURL = process.env.OPENAI_BASE_URL
-    const apiKey = process.env.OPENAI_API_KEY
-    const model = process.env.OPENAI_MODEL
-    const dimensions = 2048
+  it.skipIf(SKIP)("should work with embedding endpoint", async () => {
+    const baseURL = "https://api.siliconflow.cn/v1"
+    const apiKey = process.env.EMBEDDING_API_KEY
+    const model = "BAAI/bge-m3"
+    const dimensions = 1024
     const encodingFormat = "float"
     const texts = ["Hello World", "Test 123", "How are you doing"]
 
@@ -49,28 +49,27 @@ describe("embedding api access using fetch", () => {
     const json = (await response.json()) as { data: Array<{ embedding: number[] }> };
 
     expect(json.data).toHaveLength(3)
-    expect(json.data[0].embedding).toHaveLength(2048)
+    expect(json.data[0].embedding).toHaveLength(1024)
   });
 })
 
 describe("embedding api access using OpenaiCompatibleEmbeddings", () => {
-  const SKIP = !(process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL && process.env.OPENAI_MODEL);
+  const SKIP = !(process.env.EMBEDDING_API_KEY);
 
-  // Note: Skip by default as these tests require live API access and can be slow/unreliable
-  it.skip("get back embedding with dimension of 2048", async () => {
+  it.skipIf(SKIP)("should return always dimension 1024 with model bge-3m from siliconflow", async () => {
     const texts = ["Hello World", "Test 123", "How are you doing"]
 
     const emb = new OpenAICompatibleEmbeddings({
-      baseURL: process.env.OPENAI_BASE_URL,
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL,
-      dimensions: 2048,
+      baseURL: "https://api.siliconflow.cn/v1",
+      apiKey: process.env.EMBEDDING_API_KEY,
+      model: "BAAI/bge-m3",
+      dimensions: 768,
       encodingFormat: "float"
     })
 
     const result = await emb.embed(texts)
 
     expect(result).toHaveLength(3)
-    expect(result[0]).toHaveLength(2048)
+    expect(result[0]).toHaveLength(1024)
   });
 })

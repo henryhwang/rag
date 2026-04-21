@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20,6 +20,7 @@ import { NoopLogger } from "../src/logger/index.ts";
 
 class MockEmbeddings implements EmbeddingProvider {
   readonly dimensions = 3;
+  readonly encodingFormat = 'float';
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((t) => {
       const sum = t.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -31,6 +32,7 @@ class MockEmbeddings implements EmbeddingProvider {
 // --- Mock VectorStore ---
 
 class MockVectorStore implements VectorStore {
+  readonly metadata = null;
   private records: { id: string; embedding: number[]; metadata: Metadata }[] = [];
 
   async add(embeddings: number[][], metadatas: Metadata[], ids?: string[]): Promise<void> {
@@ -231,6 +233,7 @@ describe("H1: addDocument should not leave ghost entries on failure", () => {
     const store = new MockVectorStore();
     const failingEmbeddings: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed() {
         throw new Error("Embedding API unavailable");
       },
@@ -262,6 +265,7 @@ describe("H2: updateConfig should propagate embeddings to queryEngine", () => {
 
     const embedA: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed(texts: string[]) {
         callCountA++;
         return texts.map(() => [1, 0, 0]);
@@ -269,6 +273,7 @@ describe("H2: updateConfig should propagate embeddings to queryEngine", () => {
     };
     const embedB: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed(texts: string[]) {
         callCountB++;
         return texts.map(() => [0, 0, 1]);
@@ -362,6 +367,7 @@ describe("M1: addDocuments should report partial success", () => {
     let callCount = 0;
     const embeddings: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed(texts: string[]) {
         callCount++;
         if (callCount === 2) throw new Error("Embedding failed on 2nd call");
@@ -392,6 +398,7 @@ describe("M2: adding the same file twice should be handled", () => {
     const store = new MockVectorStore();
     const embeddings: EmbeddingProvider = {
       dimensions: 3,
+      encodingFormat: 'float',
       async embed(texts: string[]) {
         return texts.map(() => [1, 0, 0]);
       },
@@ -421,7 +428,7 @@ describe("M9: parser factory should use ESM imports", () => {
   it("should resolve parsers without require() errors", async () => {
     const { resolveParser } = await import("../src/parsers/index.ts");
     const parser = resolveParser("/path/to/file.txt");
-    expect(parser.supports("file.txt")).toBe(true);
+    expect(parser.supportedExtensions.includes("txt")).toBe(true);
   });
 });
 

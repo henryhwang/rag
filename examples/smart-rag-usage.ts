@@ -30,7 +30,7 @@
 
 import { RAG, InMemoryVectorStore, NoopLogger } from '../src/index.ts';
 import { OpenAICompatibleLLM } from '../src/llm/openai-compatible.ts';
-import type { SearchOptions } from '../src/types/index.ts';
+import type { QueryOptions } from '../src/types/index.ts';
 
 // -- The Strategy (from previous file) -------------------------
 
@@ -93,8 +93,8 @@ async function smartQuery(
     console.log("❌ Rewrite skipped - simple lookup expected");
   }
 
-  // Build search options
-  const options: SearchOptions = {
+  // Build query options
+  const options: QueryOptions = {
     topK: 5,
     scoreThreshold: 0.7,
     rewriteQuery: rewrite,
@@ -116,6 +116,7 @@ async function main() {
   const rag = new RAG({
     embeddings: {
       dimensions: 4,
+      encodingFormat: 'float',
       async embed(texts: string[]) {
         return texts.map((t) => {
           const v = [0, 0, 0, 0];

@@ -5,10 +5,10 @@
 // ============================================================
 
 import { createClient, type Client } from '@libsql/client';
-import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata } from '../types/index.ts';
+import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
+import { NoopLogger } from '../logger/index.ts';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 interface StoredRecord {
   id: string;
@@ -33,6 +33,8 @@ export interface SQLiteVectorStoreConfig {
   url?: string;
   /** Table name. Default: 'embeddings'. */
   tableName?: string;
+  /** Optional logger for warnings and diagnostics */
+  logger?: Logger;
 }
 
 const DEFAULT_URL = 'file::memory:';
@@ -42,13 +44,23 @@ export class SQLiteVectorStore implements VectorStore {
   private client: Client | null = null;
   private readonly url: string;
   private readonly tableName: string;
+  private readonly logger: Logger;
   private records: StoredRecord[] = [];
   private initialized = false;
   private _metadata: VectorStoreSchemaMetadata | null = null;
 
   constructor(config?: SQLiteVectorStoreConfig) {
     this.url = config?.url ?? DEFAULT_URL;
-    this.tableName = config?.tableName ?? DEFAULT_TABLE_NAME;
+    
+    const tableName = config?.tableName ?? DEFAULT_TABLE_NAME;
+    // Validate table name to prevent SQL injection
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+      throw new VectorStoreError(
+        `Invalid table name: ${tableName}. Table name must start with a letter or underscore, and contain only alphanumeric characters and underscores.`,
+      );
+    }
+    this.tableName = tableName;
+    this.logger = config?.logger ?? new NoopLogger();
   }
 
   /** Schema metadata - read-only access */
@@ -154,84 +166,94 @@ export class SQLiteVectorStore implements VectorStore {
       }
     }
 
-    // Initialize or validate dimension against stored schema
-    if (!this._metadata || this._metadata.embeddingDimension === 0) {
-      // First insert - lock in dimension via schema table
-      const client = this.client!;
-      await client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
-        [String(dim || 0)],
-      );
-      await client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
-        [new Date().toISOString()],
-      );
-      // Refresh cached metadata
-      this._metadata!.embeddingDimension = dim || 0;
-      this._metadata!.updatedAt = new Date();
-    } else if (dim !== this._metadata.embeddingDimension) {
-      // Subsequent inserts - validate match
-      throw new VectorStoreError(
-        `Embedding dimension mismatch: got ${dim}, expected ${this._metadata.embeddingDimension}\n` +
-        `Hint: Use the same embedding model/configuration as when you indexed documents.`,
-      );
-    }
-
     const client = this.client!;
-    const idSet = new Set<string>();
     
-    for (let i = 0; i < embeddings.length; i++) {
-      const id = ids?.[i] ?? crypto.randomUUID();
-      
-      // Check for duplicate ID in batch
-      if (idSet.has(id)) {
-        if (options?.replaceDuplicates) {
-          throw new VectorStoreError(
-            `Cannot use replaceDuplicates=true with internally generated duplicate IDs at position ${i}`,
-          );
-        }
-        continue; // Skip duplicate
+    // Wrap all database operations in a transaction for atomicity
+    await client.execute('BEGIN');
+    
+    try {
+      // Initialize or validate dimension against stored schema
+      if (!this._metadata || this._metadata.embeddingDimension === 0) {
+        // First insert - lock in dimension via schema table
+        await client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
+          [String(dim || 0)],
+        );
+        await client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
+          [new Date().toISOString()],
+        );
+        // Refresh cached metadata
+        this._metadata!.embeddingDimension = dim || 0;
+        this._metadata!.updatedAt = new Date();
+      } else if (dim !== this._metadata.embeddingDimension) {
+        // Subsequent inserts - validate match
+        throw new VectorStoreError(
+          `Embedding dimension mismatch: got ${dim}, expected ${this._metadata.embeddingDimension}\n` +
+          `Hint: Use the same embedding model/configuration as when you indexed documents.`,
+        );
       }
+
+      const idSet = new Set<string>();
       
-      // Check if ID already exists in store
-      const existingRecord = this.records.find(r => r.id === id);
-      let wasReplaced = false;
-      if (existingRecord) {
-        if (options?.replaceDuplicates) {
-          // Replace existing record in memory and database
-          const index = this.records.indexOf(existingRecord);
+      for (let i = 0; i < embeddings.length; i++) {
+        const id = ids?.[i] ?? crypto.randomUUID();
+        
+        // Check for duplicate ID in batch
+        if (idSet.has(id)) {
+          if (options?.replaceDuplicates) {
+            throw new VectorStoreError(
+              `Cannot use replaceDuplicates=true with internally generated duplicate IDs at position ${i}`,
+            );
+          }
+          continue; // Skip duplicate
+        }
+        
+        // Check if ID already exists in store
+        const existingRecord = this.records.find(r => r.id === id);
+        let wasReplaced = false;
+        if (existingRecord) {
+          if (options?.replaceDuplicates) {
+            // Replace existing record in memory and database
+            const index = this.records.indexOf(existingRecord);
+            const record: StoredRecord = {
+              id,
+              embedding: embeddings[i],
+              metadata: metadatas[i],
+            };
+            this.records[index] = record;
+            await client.execute({
+              sql: `UPDATE ${this.tableName} SET embedding = ?, metadata = ? WHERE id = ?`,
+              args: [JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i]), id],
+            });
+            wasReplaced = true;
+          } else {
+            // Skip to prevent duplicates (L7 fix)
+            continue;
+          }
+        }
+        
+        idSet.add(id);
+        
+        // Only insert new record if not replaced
+        if (!wasReplaced) {
           const record: StoredRecord = {
             id,
             embedding: embeddings[i],
             metadata: metadatas[i],
           };
-          this.records[index] = record;
+          this.records.push(record);
           await client.execute({
-            sql: `UPDATE ${this.tableName} SET embedding = ?, metadata = ? WHERE id = ?`,
-            args: [JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i]), id],
+            sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
+            args: [id, JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i])],
           });
-          wasReplaced = true;
-        } else {
-          // Skip to prevent duplicates (L7 fix)
-          continue;
         }
       }
       
-      idSet.add(id);
-      
-      // Only insert new record if not replaced
-      if (!wasReplaced) {
-        const record: StoredRecord = {
-          id,
-          embedding: embeddings[i],
-          metadata: metadatas[i],
-        };
-        this.records.push(record);
-        await client.execute({
-          sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
-          args: [id, JSON.stringify(embeddings[i]), JSON.stringify(metadatas[i])],
-        });
-      }
+      await client.execute('COMMIT');
+    } catch (error) {
+      await client.execute('ROLLBACK');
+      throw error;
     }
   }
 
@@ -271,11 +293,20 @@ export class SQLiteVectorStore implements VectorStore {
     this.records = this.records.filter((r) => !idSet.has(r.id));
 
     const client = this.client!;
-    for (const id of ids) {
-      await client.execute({
-        sql: `DELETE FROM ${this.tableName} WHERE id = ?`,
-        args: [id],
-      });
+    
+    // Wrap multiple DELETE operations in a transaction
+    await client.execute('BEGIN');
+    try {
+      for (const id of ids) {
+        await client.execute({
+          sql: `DELETE FROM ${this.tableName} WHERE id = ?`,
+          args: [id],
+        });
+      }
+      await client.execute('COMMIT');
+    } catch (error) {
+      await client.execute('ROLLBACK');
+      throw error;
     }
   }
 
@@ -387,9 +418,8 @@ export class SQLiteVectorStore implements VectorStore {
         };
       });
 
-      console.warn(
-        'Loaded legacy format store (v%d). Call save() to upgrade with schema metadata.',
-        meta.version,
+      this.logger.warn(
+        `Loaded legacy format store (v${meta.version}). Call save() to upgrade with schema metadata.`,
       );
     }
 
@@ -409,32 +439,42 @@ export class SQLiteVectorStore implements VectorStore {
 
     // If client is initialized, sync the loaded records to DB and schema table
     if (this.client && this.initialized) {
-      await this.client.execute({ sql: `DELETE FROM ${this.tableName}`, args: [] });
+      // Wrap database sync in a transaction for atomicity
+      await this.client.execute('BEGIN');
       
-      // Update schema table
-      await this.client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'version'`,
-        [String(meta.version)],
-      );
-      await this.client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
-        [String(meta.embeddingDimension)],
-      );
-      await this.client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'embedding_model'`,
-        [JSON.stringify(meta.embeddingModel)],
-      );
-      await this.client.execute(
-        `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
-        [meta.updatedAt.toISOString()],
-      );
+      try {
+        await this.client.execute({ sql: `DELETE FROM ${this.tableName}`, args: [] });
+        
+        // Update schema table
+        await this.client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'version'`,
+          [String(meta.version)],
+        );
+        await this.client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'embedding_dimension'`,
+          [String(meta.embeddingDimension)],
+        );
+        await this.client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'embedding_model'`,
+          [JSON.stringify(meta.embeddingModel)],
+        );
+        await this.client.execute(
+          `UPDATE _schema SET value = ? WHERE key = 'updated_at'`,
+          [meta.updatedAt.toISOString()],
+        );
 
-      // Insert all records
-      for (const rec of records) {
-        await this.client.execute({
-          sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
-          args: [rec.id, JSON.stringify(rec.embedding), JSON.stringify(rec.metadata)],
-        });
+        // Insert all records
+        for (const rec of records) {
+          await this.client.execute({
+            sql: `INSERT OR REPLACE INTO ${this.tableName} (id, embedding, metadata) VALUES (?, ?, ?)`,
+            args: [rec.id, JSON.stringify(rec.embedding), JSON.stringify(rec.metadata)],
+          });
+        }
+        
+        await this.client.execute('COMMIT');
+      } catch (error) {
+        await this.client.execute('ROLLBACK');
+        throw error;
       }
     }
   }

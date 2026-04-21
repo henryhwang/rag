@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { BM25Index, BM25Document, DEFAULT_BM25_CONFIG } from '../src/search/bm25.js';
+import { describe, it, expect } from 'bun:test';
+import { BM25Index, BM25Document } from '../src/search/bm25.js';
 
 describe('BM25Index', () => {
   const createDocs = (): BM25Document[] => [
@@ -11,39 +11,39 @@ describe('BM25Index', () => {
   ];
 
   describe('construction', () => {
-    test('creates with default config', () => {
+    it('creates with default config', () => {
       const index = new BM25Index();
       expect(index.size).toBe(0);
     });
 
-    test('creates with custom config', () => {
+    it('creates with custom config', () => {
       const index = new BM25Index({ k1: 2.0, b: 0.5 });
       expect(index.size).toBe(0);
     });
   });
 
   describe('addDocuments', () => {
-    test('adds documents and increases size', () => {
+    it('adds documents and increases size', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       expect(index.size).toBe(5);
     });
 
-    test('throws on document without id', () => {
+    it('throws on document without id', () => {
       const index = new BM25Index();
       expect(() =>
         index.addDocuments([{ id: '', content: 'hello', metadata: {} }]),
       ).toThrow('id and content are required');
     });
 
-    test('throws on document without content', () => {
+    it('throws on document without content', () => {
       const index = new BM25Index();
       expect(() =>
         index.addDocuments([{ id: '1', content: '', metadata: {} }]),
       ).toThrow('id and content are required');
     });
 
-    test('handles duplicate ids (last write wins)', () => {
+    it('handles duplicate ids (last write wins)', () => {
       const index = new BM25Index();
       index.addDocuments([
         { id: '1', content: 'first version', metadata: {} },
@@ -54,21 +54,21 @@ describe('BM25Index', () => {
   });
 
   describe('removeDocuments', () => {
-    test('removes documents by id', () => {
+    it('removes documents by id', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       index.removeDocuments(['1', '2']);
       expect(index.size).toBe(3);
     });
 
-    test('removing non-existent id is a no-op', () => {
+    it('removing non-existent id is a no-op', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       index.removeDocuments(['nonexistent']);
       expect(index.size).toBe(5);
     });
 
-    test('removes all documents', () => {
+    it('removes all documents', () => {
       const index = new BM25Index();
       const docs = createDocs();
       index.addDocuments(docs);
@@ -78,7 +78,7 @@ describe('BM25Index', () => {
   });
 
   describe('search', () => {
-    test('returns results for matching query', () => {
+    it('returns results for matching query', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('quick fox', 3);
@@ -87,21 +87,21 @@ describe('BM25Index', () => {
       expect(results[0].content).toContain('quick');
     });
 
-    test('returns empty for no match', () => {
+    it('returns empty for no match', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('xyzzyplugh', 5);
       expect(results.length).toBe(0);
     });
 
-    test('respects limit', () => {
+    it('respects limit', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('programming language', 2);
       expect(results.length).toBeLessThanOrEqual(2);
     });
 
-    test('returns results sorted by score descending', () => {
+    it('returns results sorted by score descending', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('programming', 3);
@@ -110,7 +110,7 @@ describe('BM25Index', () => {
       }
     });
 
-    test('returns id, content, score, metadata', () => {
+    it('returns id, content, score, metadata', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('dog', 1);
@@ -121,7 +121,7 @@ describe('BM25Index', () => {
       expect(results[0]).toHaveProperty('metadata');
     });
 
-    test('scores higher for more frequent terms', () => {
+    it('scores higher for more frequent terms', () => {
       const index = new BM25Index();
       index.addDocuments([
         { id: '1', content: 'quick quick quick quick quick', metadata: {} },
@@ -132,27 +132,27 @@ describe('BM25Index', () => {
       expect(results[0].score).toBeGreaterThan(results[1].score);
     });
 
-    test('handles empty query', () => {
+    it('handles empty query', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('', 5);
       expect(results).toEqual([]);
     });
 
-    test('handles query with only punctuation', () => {
+    it('handles query with only punctuation', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const results = index.search('...!!!???', 5);
       expect(results).toEqual([]);
     });
 
-    test('search on empty index returns empty', () => {
+    it('search on empty index returns empty', () => {
       const index = new BM25Index();
       const results = index.search('hello', 5);
       expect(results).toEqual([]);
     });
 
-    test('case insensitive search', () => {
+    it('case insensitive search', () => {
       const index = new BM25Index();
       index.addDocuments(createDocs());
       const resultsLower = index.search('quick fox', 5);
@@ -160,7 +160,7 @@ describe('BM25Index', () => {
       expect(resultsLower).toEqual(resultsUpper);
     });
 
-    test('metadata is preserved in results', () => {
+    it('metadata is preserved in results', () => {
       const index = new BM25Index();
       index.addDocuments([
         { id: '1', content: 'hello world', metadata: { documentId: 'doc1', custom: 'value' } },
@@ -172,7 +172,7 @@ describe('BM25Index', () => {
   });
 
   describe('indexedIds', () => {
-    test('returns all document ids', () => {
+    it('returns all document ids', () => {
       const index = new BM25Index();
       const docs = createDocs();
       index.addDocuments(docs);
@@ -182,7 +182,7 @@ describe('BM25Index', () => {
   });
 
   describe('BM25 scoring properties', () => {
-    test('rarer terms get higher scores', () => {
+    it('rarer terms get higher scores', () => {
       const index = new BM25Index();
       index.addDocuments([
         { id: '1', content: 'the cat sat on the mat', metadata: {} },
@@ -202,7 +202,7 @@ describe('BM25Index', () => {
       }
     });
 
-    test('shorter documents with matching terms rank higher', () => {
+    it('shorter documents with matching terms rank higher', () => {
       const index = new BM25Index();
       index.addDocuments([
         { id: '1', content: 'python python python', metadata: {} },

@@ -11,6 +11,7 @@ import { RAG, InMemoryVectorStore, NoopLogger } from "../src/index.ts";
 
 class MockEmbeddings {
   readonly dimensions = 4;
+  readonly encodingFormat = 'float';
 
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((t) => {
