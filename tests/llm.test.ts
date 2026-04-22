@@ -3,7 +3,7 @@ import {
   OpenAICompatibleLLM,
 } from "../src/llm/index.ts";
 import { LLMError } from "../src/errors/index.ts";
-import { createMockFetch, createMockFetchError, createMockStreamingFetch } from "./helpers/mock-fetch.ts";
+import { createMockFetch, createMockFetchError, createMockStreamingFetch } from "./utils/mock-fetch.ts";
 
 // --- Shared error-case tests for generate/generateMessages ---
 

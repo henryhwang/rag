@@ -23,7 +23,7 @@ export interface Chunk {
 // -- Metadata & Filtering --------------------------------------------
 
 export interface Metadata {
-  [key: string]: string | number | boolean | null;
+  [key: string]: string | number | boolean | null | string[] | undefined;
 }
 
 export type Filter = Record<string, string | number | boolean>;
@@ -93,6 +93,28 @@ export interface ParsedDocument {
   metadata: Record<string, unknown>;
 }
 
+// --- Sparse Search ---------------------------------------------------
+
+export interface SparseDocument {
+  id: string;
+  content: string;
+  metadata: Metadata;
+}
+
+export interface SparseSearchResult {
+  id: string;
+  content: string;
+  score: number;
+  metadata: Metadata;
+}
+
+export interface SparseSearchProvider {
+  search(query: string, limit?: number): SparseSearchResult[];
+  addDocuments(documents: SparseDocument[]): void;
+  removeDocuments(ids: string[]): void;
+  readonly size: number;
+}
+
 // -- Chunking ---------------------------------------------------------
 
 export type ChunkingStrategy = 'fixed' | 'recursive' | 'markdown';
@@ -100,7 +122,7 @@ export type ChunkingStrategy = 'fixed' | 'recursive' | 'markdown';
 export interface ChunkOptions {
   strategy: ChunkingStrategy;
   size: number;
-  overlap: number;
+  overlap?: number;
   maxTokens?: number;
 }
 
@@ -258,6 +280,11 @@ export interface RAGConfig {
   logger?: Logger;
   /** Retry configuration for network operations */
   retry?: RetryConfig;
+  /** Optional reranker for post-search ranking. */
+  reranker?: Reranker;
+  /** Optional query rewriter for pre-search expansion. */
+  queryRewriter?: QueryRewriter;
+  sparseSearch?: SparseSearchProvider;
 }
 
 // -- Logger -----------------------------------------------------------

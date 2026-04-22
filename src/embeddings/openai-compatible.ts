@@ -3,7 +3,7 @@
 // Works with OpenAI, Ollama, vLLM, LiteLLM, etc.
 // ============================================================
 
-import { EmbeddingProvider } from '../types/index.ts';
+import { type EmbeddingProvider } from '../types/index.ts';
 import { EmbeddingError } from '../errors/index.ts';
 import { retryAsync } from '../utils/retry.ts';
 
@@ -110,7 +110,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '');
-      
+
       // Parse rate limit info from headers if available
       const retryAfter = response.headers.get('Retry-After');
 
@@ -118,7 +118,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
         `Check API key validity`,
         `Verify sufficient quota/credits for model: ${this.model}`,
       ];
-      
+
       if (response.status === 429) {
         troubleshooting.unshift(`Rate limit exceeded${retryAfter ? `. Retry after: ${retryAfter}s` : ''}`);
       } else if (response.status >= 500) {
@@ -126,7 +126,7 @@ export class OpenAICompatibleEmbeddings implements EmbeddingProvider {
       } else if (response.status === 401 || response.status === 403) {
         troubleshooting.unshift(`Authentication failed - verify API key is correct and has required permissions`);
       }
-      
+
       throw new EmbeddingError(
         `Embeddings API returned HTTP ${response.status}${bodyText ? ':\n' + bodyText.substring(0, 200) : ''}.\n` +
         `Endpoint: ${url}\n` +

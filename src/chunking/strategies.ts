@@ -1,247 +1,46 @@
-// ============================================================
-// Chunking strategies — fixed, recursive, markdown-aware
-// ============================================================
-
-import { Chunk, ChunkOptions } from '../types/index.ts';
-import { ChunkingError } from '../errors/index.ts';
 import { v4 as uuidv4 } from 'uuid';
+import type { Chunk, ChunkOptions, Metadata } from '../types/index.ts';
+import { ChunkingError } from '../errors/index.ts';
 
+const DEFAULT_OVERLAP_RATIO = 0.15;
+
+// ====================== Main Entry Point ======================
 export function chunkText(
   content: string,
   documentId: string,
   options: ChunkOptions,
 ): Chunk[] {
+  if (!content?.trim()) return [];
+
+  const size = options.size;
+  const overlap = options.overlap ?? Math.floor(size * DEFAULT_OVERLAP_RATIO);
+
+  if (size <= 0) throw new ChunkingError('Chunk size must be > 0');
+  if (overlap < 0) throw new ChunkingError('Overlap must be >= 0');
+  if (overlap >= size) throw new ChunkingError('Overlap must be less than chunk size');
+
+  if (overlap >= size * 0.4) {
+    console.warn(`[Chunking] Large overlap (${overlap}/${size}) may cause redundancy. Consider reducing it.`);
+  }
+
   switch (options.strategy) {
     case 'fixed':
-      return fixedSizeChunk(content, documentId, options.size, options.overlap);
+      return fixedSizeChunk(content, documentId, size, overlap);
     case 'recursive':
-      return recursiveChunk(content, documentId, options.size, options.overlap);
+      return recursiveChunk(content, documentId, size, overlap);
     case 'markdown':
-      return markdownAwareChunk(content, documentId, options.size, options.overlap);
+      return markdownAwareChunk(content, documentId, size, overlap);
     default:
       throw new ChunkingError(`Unknown chunking strategy: "${options.strategy}"`);
   }
 }
 
-// ============================================================
-// Fixed-size character chunking (Phase 1)
-// ============================================================
-
+// ====================== FIXED ======================
 function fixedSizeChunk(
   content: string,
   documentId: string,
   size: number,
   overlap: number,
-): Chunk[] {
-  if (size <= 0) throw new ChunkingError('Chunk size must be > 0');
-  if (overlap < 0) throw new ChunkingError('Overlap must be >= 0');
-  if (overlap >= size) throw new ChunkingError('Overlap must be less than chunk size');
-
-  return makeChunks(content, documentId, size, overlap, (c, s, e) => c.slice(s, e));
-}
-
-// ============================================================
-// Recursive chunking — split by semantic boundaries
-// Tries paragraphs → sentences → fixed-size as fallback
-// ============================================================
-
-function recursiveChunk(
-  content: string,
-  documentId: string,
-  size: number,
-  overlap: number,
-): Chunk[] {
-  if (size <= 0) throw new ChunkingError('Chunk size must be > 0');
-  if (overlap < 0) throw new ChunkingError('Overlap must be >= 0');
-  if (overlap >= size) throw new ChunkingError('Overlap must be less than chunk size');
-
-  // Split into paragraphs first (double-newline boundaries)
-  const paragraphs = content.split(/\n{2,}/).filter(Boolean);
-  const chunks: Chunk[] = [];
-  let index = 0;
-  let current = '';
-
-  for (const para of paragraphs) {
-    const trimmed = para.trim();
-    if (!trimmed) continue;
-
-    // If adding this paragraph exceeds the limit, flush current
-    if (current && current.length + trimmed.length > size) {
-      const flushed = current.trim();
-      chunks.push(makeChunk(flushed, documentId, index++));
-
-      // If the paragraph itself is too large, split it by sentences
-      if (trimmed.length > size) {
-        // Prepend overlap context from the flushed chunk to the first sentence
-        const overlapText = overlap > 0 && flushed.length > overlap
-          ? flushed.slice(-overlap) + '\n\n'
-          : '';
-        const sentenceChunks = splitSentences(trimmed, documentId, size, overlap, index);
-        if (overlapText && sentenceChunks.length > 0) {
-          sentenceChunks[0].content = overlapText + sentenceChunks[0].content;
-        }
-        chunks.push(...sentenceChunks);
-        index = chunks.length;
-        current = '';
-      } else {
-        // Carry trailing overlap into the next chunk
-        current = overlap > 0 && flushed.length > overlap
-          ? flushed.slice(-overlap) + '\n\n' + trimmed
-          : trimmed;
-
-        // If overlap push exceeds size, fall back to just the new paragraph
-        if (current.length > size) {
-          current = trimmed;
-        }
-      }
-    } else if (!current && trimmed.length > size) {
-      // First paragraph alone exceeds size — split by sentences
-      chunks.push(...splitSentences(trimmed, documentId, size, overlap, index));
-      index = chunks.length;
-    } else {
-      current = current ? `${current}\n\n${trimmed}` : trimmed;
-    }
-  }
-
-  if (current) {
-    // Final flush — if it still exceeds the limit, fall back to fixed-size
-    if (current.length > size) {
-      const fallback = fixedSizeChunk(current.trim(), documentId, size, overlap);
-      chunks.push(...fallback.map((c, i) => ({ ...c, index: index + i })));
-    } else {
-      chunks.push(makeChunk(current.trim(), documentId, index++));
-    }
-  }
-
-  return chunks;
-}
-
-function splitSentences(
-  text: string,
-  documentId: string,
-  size: number,
-  overlap: number,
-  startIndex: number,
-): Chunk[] {
-  // Split on sentence boundaries (. ! ? followed by space)
-  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
-  const chunks: Chunk[] = [];
-  let current = '';
-  let idx = startIndex;
-
-  for (const sent of sentences) {
-    if (current && (current.length + sent.length) > size) {
-      // Flush current — but check if it itself exceeds the limit
-      if (current.length > size) {
-        const fallback = fixedSizeChunk(current.trim(), documentId, size, overlap);
-        chunks.push(...fallback.map((c, i) => ({ ...c, index: idx + i })));
-        idx = chunks.length;
-      } else {
-        chunks.push(makeChunk(current.trim(), documentId, idx++));
-      }
-      current = '';
-    }
-    current = current ? `${current} ${sent}` : sent;
-  }
-
-  if (current) {
-    // If the remaining chunk is still too large, fall back to fixed-size
-    if (current.length > size) {
-      const fallback = fixedSizeChunk(current, documentId, size, overlap);
-      chunks.push(...fallback.map((c, i) => ({ ...c, index: idx + i })));
-    } else {
-      chunks.push(makeChunk(current.trim(), documentId, idx));
-    }
-  }
-
-  return chunks;
-}
-
-// ============================================================
-// Markdown-aware chunking — preserve headers and code blocks
-// ============================================================
-
-function markdownAwareChunk(
-  content: string,
-  documentId: string,
-  size: number,
-  overlap: number,
-): Chunk[] {
-  if (size <= 0) throw new ChunkingError('Chunk size must be > 0');
-  if (overlap < 0) throw new ChunkingError('Overlap must be >= 0');
-  if (overlap >= size) throw new ChunkingError('Overlap must be less than chunk size');
-
-  const lines = content.split('\n');
-  const chunks: Chunk[] = [];
-  let current = '';
-  let index = 0;
-  let inCodeBlock = false;
-  let currentHeading = '';
-
-  for (const line of lines) {
-    const isCodeFence = line.trim().startsWith('```');
-    const isHeading = /^#{1,6}\s+/.test(line);
-
-    // Track code block state — never split inside code blocks
-    if (isCodeFence) {
-      inCodeBlock = !inCodeBlock;
-    }
-
-    // If we hit a heading, always flush current chunk before starting new
-    if (isHeading && !inCodeBlock) {
-      if (current) {
-        chunks.push(makeChunk(current.trim(), documentId, index++));
-        current = '';
-      }
-      currentHeading = line;
-      current = line;
-      continue;
-    }
-
-    // Inside code block — always append, never split
-    if (inCodeBlock) {
-      current = current ? `${current}\n${line}` : line;
-      continue;
-    }
-
-    // Check if adding this line exceeds the limit
-    const appended = current ? `${current}\n${line}` : line;
-    if (appended.length > size && current) {
-      const flushed = current.trim();
-      chunks.push(makeChunk(flushed, documentId, index++));
-      // Carry trailing overlap into the next chunk, prepend heading for context
-      const overlapTail = overlap > 0 && flushed.length > overlap
-        ? '\n' + flushed.slice(-overlap)
-        : '';
-      current = currentHeading
-        ? `${currentHeading}${overlapTail}\n${line}`
-        : overlapTail + '\n' + line;
-    } else {
-      current = appended;
-    }
-  }
-
-  if (current) {
-    chunks.push(makeChunk(current.trim(), documentId, index++));
-  }
-
-  return chunks;
-}
-
-// ============================================================
-// Shared helpers
-// ============================================================
-
-function makeChunk(content: string, documentId: string, index: number): Chunk {
-  return { id: uuidv4(), content, documentId, metadata: {}, index };
-}
-
-function makeChunks(
-  content: string,
-  documentId: string,
-  size: number,
-  overlap: number,
-  slicer: (c: string, s: number, e: number) => string,
 ): Chunk[] {
   const chunks: Chunk[] = [];
   let start = 0;
@@ -249,13 +48,219 @@ function makeChunks(
 
   while (start < content.length) {
     const end = Math.min(start + size, content.length);
-    const chunkContent = slicer(content, start, end);
+    const chunkContent = content.slice(start, end).trim();
 
-    chunks.push(makeChunk(chunkContent, documentId, index++));
+    if (chunkContent) {
+      chunks.push(makeChunk(chunkContent, documentId, index++, 'fixed'));
+    }
 
     if (end >= content.length) break;
     start += size - overlap;
   }
+  return chunks;
+}
+
+// ====================== RECURSIVE ======================
+const RECURSIVE_SEPARATORS = ['\n\n', '\n', '. ', '? ', '! ', ' ', ''];
+
+function recursiveChunk(
+  content: string,
+  documentId: string,
+  size: number,
+  overlap: number,
+): Chunk[] {
+  const chunks: Chunk[] = [];
+  splitRecursively(content.trim(), documentId, size, overlap, RECURSIVE_SEPARATORS, 0, chunks);
+  return chunks;
+}
+
+/** Get word-safe overlap suffix to avoid cutting words mid-stream */
+function getOverlapSuffix(text: string, maxChars: number): string {
+  if (maxChars <= 0 || maxChars >= text.length) return '';
+  const raw = text.slice(-maxChars);
+  const lastSpace = raw.lastIndexOf(' ');
+  if (lastSpace === -1) return raw;
+  return raw.slice(lastSpace + 1);
+}
+
+function splitRecursively(
+  text: string,
+  documentId: string,
+  size: number,
+  overlap: number,
+  separators: readonly string[],
+  startIndex: number,
+  chunks: Chunk[],
+  overlapPrefix: string = '',
+): number {
+  if (!text && !overlapPrefix) return startIndex;
+
+  // Apply overlap prefix to the text
+  let workingText = overlapPrefix ? `${overlapPrefix}${text}` : text;
+
+  // Base case: text fits in one chunk
+  if (workingText.length <= size) {
+    chunks.push(makeChunk(workingText, documentId, startIndex, 'paragraph'));
+    return startIndex + 1;
+  }
+
+  // No more separators: force fixed-size split
+  if (separators.length === 0) {
+    const fixedChunks = fixedSizeChunk(workingText, documentId, size, overlap);
+    fixedChunks.forEach((c, i) => {
+      chunks.push({ ...c, index: startIndex + i });
+    });
+    return startIndex + fixedChunks.length;
+  }
+
+  const sep = separators[0];
+  const parts = sep ? workingText.split(sep) : [workingText];
+
+  let current = '';
+  let idx = startIndex;
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    const candidate = current ? `${current}${sep}${trimmed}` : trimmed;
+
+    if (candidate.length <= size) {
+      current = candidate;
+      continue;
+    }
+
+    // Candidate exceeds size - push current if exists
+    if (current) {
+      chunks.push(makeChunk(current, documentId, idx++, 'paragraph'));
+    }
+
+    // Handle oversized part
+    if (trimmed.length > size) {
+      // Add overlap from current chunk as prefix for next iteration
+      const overlapToPass = getOverlapSuffix(current, overlap);
+      idx = splitRecursively(trimmed, documentId, size, overlap, separators.slice(1), idx, chunks, overlapToPass);
+    } else {
+      current = trimmed;
+    }
+  }
+
+  // Handle remaining text
+  if (current) {
+    if (current.length > size) {
+      const overlapToPass = getOverlapSuffix(current.slice(0, -overlap), overlap);
+      idx = splitRecursively(current, documentId, size, overlap, separators.slice(1), idx, chunks, overlapToPass);
+    } else {
+      chunks.push(makeChunk(current, documentId, idx, 'paragraph'));
+      idx++;
+    }
+  }
+
+  return idx;
+}
+
+
+
+// ====================== MARKDOWN ======================
+function markdownAwareChunk(
+  content: string,
+  documentId: string,
+  size: number,
+  overlap: number,
+): Chunk[] {
+  const lines = content.split('\n');
+  const chunks: Chunk[] = [];
+  let current = '';
+  let index = 0;
+  let inCodeBlock = false;
+  const headingStack: string[] = [];
+
+  for (const line of lines) {
+    const isCodeFence = /^\s*```|^\s*~~~/.test(line);
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+
+    if (isCodeFence) inCodeBlock = !inCodeBlock;
+
+    if (headingMatch && !inCodeBlock) {
+      if (current.trim()) {
+        chunks.push(makeChunk(current.trim(), documentId, index++, 'paragraph', [...headingStack]));
+      }
+      current = '';
+
+      const level = headingMatch[1].length;
+      headingStack.length = level - 1;
+      headingStack.push(line.trim());
+      current = line;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      current += (current ? '\n' : '') + line;
+      continue;
+    }
+
+    const appended = current ? `${current}\n${line}` : line;
+
+    // Handle extremely long lines by forced splitting  
+    if (line.length > size && !inCodeBlock && !headingMatch) {
+      if (current.trim()) {
+        chunks.push(makeChunk(current.trim(), documentId, index++, 'paragraph', [...headingStack]));
+      }
+      // Use fixed-size splitting for the long line with proper indexing
+      const fixedChunks = fixedSizeChunk(line, documentId, size, Math.floor(size * 0.1));
+      fixedChunks.forEach((c, i) => {
+        chunks.push({
+          ...c,
+          index: index + i,
+          metadata: { ...c.metadata, heading: headingStack[headingStack.length - 1] },
+        });
+      });
+      index += fixedChunks.length;
+      current = '';
+      continue;
+    }
+
+    if (appended.length > size && current.trim()) {
+      chunks.push(makeChunk(current.trim(), documentId, index++, 'paragraph', [...headingStack]));
+
+      const overlapText = overlap > 0 ? getOverlapSuffix(current, overlap) : '';
+      const headingPrefix = headingStack.length ? headingStack[headingStack.length - 1] + '\n' : '';
+      current = headingPrefix + (overlapText ? overlapText + '\n' : '') + line;
+    } else {
+      current = appended;
+    }
+  }
+
+  if (current.trim()) {
+    chunks.push(makeChunk(current.trim(), documentId, index++, 'paragraph', [...headingStack]));
+  }
 
   return chunks;
+}
+
+// ====================== makeChunk ======================
+function makeChunk(
+  content: string,
+  documentId: string,
+  index: number,
+  chunkType: 'paragraph' | 'heading' | 'code' | 'sentence' | 'fixed',
+  headings: string[] = []
+): Chunk {
+  const metadata: Metadata = {
+    chunkType,
+    isCodeBlock: content.includes('```') || content.includes('~~~'),
+  };
+
+  if (headings.length > 0) {
+    metadata.headings = [...headings];
+    metadata.heading = headings[headings.length - 1];
+  }
+
+  return {
+    id: uuidv4(),
+    content: content.trim(),
+    documentId,
+    index,
+    metadata,
+  };
 }

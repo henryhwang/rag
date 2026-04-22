@@ -3,14 +3,10 @@
 // Uses the Okapi BM25 ranking function.
 // ============================================================
 
-import { Metadata } from '../types/index.ts';
+import type { Metadata, SparseDocument } from '../types/index.ts'
 import { SearchError } from '../errors/index.ts';
 
-export interface BM25Document {
-  id: string;
-  content: string;
-  metadata: Metadata;
-}
+export type BM25Document = SparseDocument;
 
 export interface BM25SearchResult {
   id: string;
@@ -115,7 +111,7 @@ export class BM25Index {
   }
 
   /** Search the BM25 index for a query. */
-  search(query: string, limit: number): BM25SearchResult[] {
+  search(query: string, limit?: number): BM25SearchResult[] {
     const queryTerms = tokenize(query);
     if (queryTerms.length === 0) {
       return [];

@@ -2,7 +2,7 @@
 // Tests for batching utilities
 // ============================================================
 import { describe, it, expect } from 'bun:test';
-import { getBatchIndices, estimateTokens } from '../src/reranking/batching.js';
+import { getBatchIndices, estimateTokens } from '../src/reranking/batching.ts';
 
 describe('getBatchIndices', () => {
   it('returns empty iterator when totalDocs is 0', () => {

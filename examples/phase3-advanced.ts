@@ -37,7 +37,7 @@ class MockEmbeddings {
 
 class MockLLM {
   async generate(prompt: string): Promise<string> {
-    return `[Mock LLM] Answer based on retrieved context.`;
+    return `[Mock LLM] Answer based on retrieved context for the query of "${prompt}".`;
   }
   async *stream(_prompt: string): AsyncIterable<string> { }
 }
@@ -56,8 +56,9 @@ async function main() {
       vectorStore: new InMemoryVectorStore(),
       chunking: { strategy: "fixed", size: 200, overlap: 20 },
       logger: new NoopLogger(),
+      sparseSearch: bm25,
+      queryRewriter: rewriter
     },
-    { bm25, queryRewriter: rewriter }, // Phase 3 config
   );
 
   console.log("=== Adding documents ===\n");

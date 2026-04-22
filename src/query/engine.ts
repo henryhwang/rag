@@ -18,12 +18,12 @@ import type {
   Reranker,
   QueryRewriter,
   Metadata,
+  SparseSearchProvider,
+  SparseDocument,
 } from '../types/index.ts';
 import { DEFAULT_SEARCH_OPTIONS } from '../types/index.ts';
 import { QueryError, RerankError } from '../errors/index.ts';
 import {
-  BM25Index,
-  BM25Document,
   fuseResults,
   DEFAULT_HYBRID_CONFIG as SEARCH_DEFAULT_HYBRID_CONFIG,
 } from '../search/index.ts';
@@ -32,11 +32,8 @@ export interface QueryEngineConfig {
   embeddings: EmbeddingProvider;
   vectorStore: VectorStore;
   logger: Logger;
-  /** Optional BM25 index for sparse/hybrid search. */
-  bm25?: BM25Index;
-  /** Optional reranker for post-search ranking. */
+  sparseSearch?: SparseSearchProvider;
   reranker?: Reranker;
-  /** Optional query rewriter for pre-search expansion. */
   queryRewriter?: QueryRewriter;
 }
 
@@ -44,7 +41,7 @@ export class QueryEngine {
   private readonly embeddings: EmbeddingProvider;
   private readonly vectorStore: VectorStore;
   private readonly logger: Logger;
-  private readonly bm25?: BM25Index;
+  private readonly sparseSearch?: SparseSearchProvider;
   private readonly reranker?: Reranker;
   private readonly queryRewriter?: QueryRewriter;
 
@@ -52,7 +49,7 @@ export class QueryEngine {
     this.embeddings = opts.embeddings;
     this.vectorStore = opts.vectorStore;
     this.logger = opts.logger;
-    this.bm25 = opts.bm25;
+    this.sparseSearch = opts.sparseSearch;
     this.reranker = opts.reranker;
     this.queryRewriter = opts.queryRewriter;
   }
@@ -60,11 +57,11 @@ export class QueryEngine {
   // -- Public API -----------------------------------------------------
 
   /**
-   * Sync BM25 index with documents. Call this after adding documents
+   * Sync sparse search ith documents. Call this after adding documents
    * to the vector store if you want hybrid/sparse search to work.
    */
-  syncBM25(documents: BM25Document[]): void {
-    this.bm25?.addDocuments(documents);
+  syncSparseSearch(documents: SparseDocument[]): void {
+    this.sparseSearch?.addDocuments(documents);
   }
 
   /**
@@ -81,7 +78,7 @@ export class QueryEngine {
     let results: SearchResult[];
 
     if (searchMode === 'sparse') {
-      results = await this.sparseSearch(queries, opts);
+      results = await this.executeSparseSearch(queries, opts);
     } else if (searchMode === 'hybrid') {
       results = await this.hybridSearch(queries, opts);
     } else {
@@ -183,21 +180,21 @@ export class QueryEngine {
     );
   }
 
-  private async sparseSearch(
+  private async executeSparseSearch(
     queries: string[],
     opts: SearchOptions,
   ): Promise<SearchResult[]> {
-    if (!this.bm25) {
+    if (!this.sparseSearch) {
       throw new QueryError(
-        'BM25 index is required for sparse search. Configure it via QueryEngineConfig.bm25.',
+        'Sparse search provider is required for sparse search. Configure it via QueryEngineConfig.sparseSearch.',
       );
     }
 
     const allResults: SearchResult[] = [];
 
     for (const q of queries) {
-      this.logger.debug('BM25 search (sparse): %s', q);
-      const results = this.bm25.search(q, opts.topK ?? 5);
+      this.logger.debug('Sparse search (sparse): %s', q);
+      const results = this.sparseSearch.search(q, opts.topK ?? 5);
 
       for (const r of results) {
         allResults.push({
@@ -219,15 +216,15 @@ export class QueryEngine {
     queries: string[],
     opts: SearchOptions,
   ): Promise<SearchResult[]> {
-    if (!this.bm25) {
+    if (!this.sparseSearch) {
       throw new QueryError(
-        'BM25 index is required for hybrid search. Configure it via QueryEngineConfig.bm25.',
+        'Sparse search provider is required for hybrid search. Configure it via QueryEngineConfig.sparseSearch.',
       );
     }
 
     const denseWeight = opts.denseWeight ?? SEARCH_DEFAULT_HYBRID_CONFIG.denseWeight;
     const allDense: SearchResult[] = [];
-    const allSparse: ReturnType<typeof this.bm25.search> = [];
+    const allSparse: ReturnType<typeof this.sparseSearch.search> = [];
 
     for (const q of queries) {
       // Dense path
@@ -245,8 +242,8 @@ export class QueryEngine {
       }
 
       // Sparse path
-      this.logger.debug('BM25 search (hybrid sparse): %s', q);
-      const sparseResults = this.bm25.search(q, opts.topK ?? 5);
+      this.logger.debug('Sparse search (hybrid sparse): %s', q);
+      const sparseResults = this.sparseSearch.search(q, opts.topK ?? 5);
       allSparse.push(...sparseResults);
     }
 

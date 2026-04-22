@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { RAG } from "../src/core/RAG.ts";
-import { BM25Index } from "../src/search/bm25.ts";
+import { MockSparseSearchProvider } from './utils/mock-sparse.ts'
 import { RAGError } from "../src/errors/index.ts";
 import type {
   EmbeddingProvider,
@@ -15,6 +15,7 @@ import type {
   LLMOptions,
 } from "../src/types/index.ts";
 import { NoopLogger } from "../src/logger/index.ts";
+import { afterEach, beforeEach } from "node:test";
 
 // --- Mock EmbeddingProvider ---
 
@@ -60,8 +61,8 @@ class MockVectorStore implements VectorStore {
     this.records = this.records.filter((r) => !s.has(r.id));
   }
 
-  async save(_path: string): Promise<void> {}
-  async load(_path: string): Promise<void> {}
+  async save(_path: string): Promise<void> { }
+  async load(_path: string): Promise<void> { }
   get size(): number { return this.records.length; }
 }
 
@@ -71,7 +72,7 @@ class MockLLM implements LLMProvider {
   async generate(_prompt: string, _options?: LLMOptions): Promise<string> {
     return "Mock answer based on context.";
   }
-  async *stream(_prompt: string, _options?: LLMOptions): AsyncIterable<string> {}
+  async *stream(_prompt: string, _options?: LLMOptions): AsyncIterable<string> { }
 }
 
 // --- Helpers ---
@@ -316,13 +317,13 @@ describe("H2: updateConfig should propagate embeddings to queryEngine", () => {
     (rag as any).updateConfig({ chunking: undefined });
 
     await rag.query("test query?");
-    
+
     expect(rag.listDocuments().length).toBeGreaterThan(0);
   });
 
   it("H2(b): should update main logger but note queryEngine may need rebuild", async () => {
     const loggedCalls: { method: string; args: unknown[] }[] = [];
-    
+
     const customLogger = {
       debug: (...args: unknown[]) => {
         loggedCalls.push({ method: 'debug', args });
@@ -450,43 +451,42 @@ describe("M10: PdfParser should work with installed pdf-parse version", () => {
   });
 });
 
-// ============================================================
-// Phase 3: BM25 integration in RAG class
-// ============================================================
-
-describe("Phase 3: BM25 integration", () => {
-  it("should auto-index documents in BM25 when configured", async () => {
-    const bm25 = new BM25Index();
+describe("sparse search integration", () => {
+  let mockSparse: MockSparseSearchProvider
+  beforeEach(() => mockSparse = new MockSparseSearchProvider());
+  afterEach(() => mockSparse.reset())
+  it("should auto-index documents in sparse search when configured", async () => {
     const rag = new RAG({
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { bm25 });
+      sparseSearch: mockSparse,
+    });
 
     const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
     await rag.addDocument(filePath);
 
-    expect(bm25.size).toBeGreaterThan(0);
+    expect(mockSparse.size).toBeGreaterThan(0);
   });
 
-  it("should remove documents from BM25 on removeDocument", async () => {
-    const bm25 = new BM25Index();
+  it("should remove documents from sparse search on removeDocument", async () => {
     const rag = new RAG({
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { bm25 });
+      sparseSearch: mockSparse,
+    });
 
     const filePath = await writeTemp("txt", "Hello world test content");
     const doc = await rag.addDocument(filePath);
-    const sizeBefore = bm25.size;
+    const sizeBefore = mockSparse.size;
     expect(sizeBefore).toBeGreaterThan(0);
 
     await rag.removeDocument(doc.id);
-    expect(bm25.size).toBeLessThan(sizeBefore);
+    expect(mockSparse.size).toBeLessThan(sizeBefore);
   });
 
-  it("should work without BM25 (backward compatible)", async () => {
+  it("should work without sparse search (backward compatible)", async () => {
     const { rag } = makeRag();
 
     const filePath = await writeTemp("txt", "Hello world");
@@ -496,18 +496,17 @@ describe("Phase 3: BM25 integration", () => {
   });
 });
 
-// ============================================================
-// Phase 3: End-to-end RAG flow with sparse/hybrid/rerank/rewrite
-// ============================================================
-
-describe("Phase 3: RAG end-to-end flow", () => {
+describe("RAG end-to-end flow", () => {
+  let mockSparse: MockSparseSearchProvider
+  beforeEach(() => mockSparse = new MockSparseSearchProvider());
+  afterEach(() => mockSparse.reset())
   it("should query with sparse mode through RAG API", async () => {
-    const bm25 = new BM25Index();
     const rag = new RAG({
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { bm25 });
+      sparseSearch: mockSparse,
+    });
 
     const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
     await rag.addDocument(filePath);
@@ -518,12 +517,12 @@ describe("Phase 3: RAG end-to-end flow", () => {
   });
 
   it("should query with hybrid mode through RAG API", async () => {
-    const bm25 = new BM25Index();
     const rag = new RAG({
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { bm25 });
+      sparseSearch: mockSparse,
+    });
 
     const filePath = await writeTemp("txt", "TypeScript is a typed programming language for web development");
     await rag.addDocument(filePath);
@@ -544,7 +543,8 @@ describe("Phase 3: RAG end-to-end flow", () => {
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { reranker: mockReranker as any });
+      reranker: mockReranker
+    });
 
     const filePath = await writeTemp("txt", "TypeScript is a typed programming language");
     await rag.addDocument(filePath);
@@ -564,7 +564,8 @@ describe("Phase 3: RAG end-to-end flow", () => {
       embeddings: new MockEmbeddings(),
       vectorStore: new MockVectorStore(),
       logger: new NoopLogger(),
-    }, { queryRewriter: mockRewriter as any });
+      queryRewriter: mockRewriter
+    });
 
     const filePath = await writeTemp("txt", "TypeScript programming");
     await rag.addDocument(filePath);
@@ -574,7 +575,6 @@ describe("Phase 3: RAG end-to-end flow", () => {
   });
 
   it("should use all Phase 3 features together", async () => {
-    const bm25 = new BM25Index();
     const mockReranker = {
       name: "MockReranker",
       async rerank(_query: string, documents: string[]): Promise<number[]> {
@@ -592,8 +592,10 @@ describe("Phase 3: RAG end-to-end flow", () => {
         embeddings: new MockEmbeddings(),
         vectorStore: new MockVectorStore(),
         logger: new NoopLogger(),
+        sparseSearch: mockSparse,
+        reranker: mockReranker,
+        queryRewriter: mockRewriter
       },
-      { bm25, reranker: mockReranker as any, queryRewriter: mockRewriter as any },
     );
 
     const filePath = await writeTemp("txt", "Advanced TypeScript patterns for web development");

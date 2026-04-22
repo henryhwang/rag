@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { BM25Index, BM25Document } from '../src/search/bm25.js';
+import { BM25Index, BM25Document } from '../src/search/bm25.ts';
 
 describe('BM25Index', () => {
   const createDocs = (): BM25Document[] => [

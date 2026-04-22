@@ -84,12 +84,12 @@ export { QueryEngine } from './query/index.ts';
 // Utils
 export { generateDocId, createDocumentInfo } from './core/utils.ts';
 
-// Phase 3: Search
+// Search
 export {
   BM25Index,
   fuseResults,
   reciprocalRankFusion,
-  syncBM25WithStore,
+  syncSparseSearch,
   type BM25Document,
   type BM25SearchResult,
   type BM25Config,
@@ -98,21 +98,18 @@ export {
   DEFAULT_HYBRID_CONFIG,
 } from './search/index.ts';
 
-// Phase 3: Reranker
+// Reranker
 export {
   OpenAICompatibleReranker,
   type OpenAICompatibleRerankerConfig,
 } from './reranking/index.ts';
 
-// Phase 3: Query Rewrite
+// Query Rewrite
 export {
   LLMQueryRewriter,
   SimpleQueryRewriter,
   type LLMQueryRewriterConfig,
 } from './query/rewrite/index.ts';
-
-// Phase 3: RAG Phase 3 config
-export { type RAGPhase3Config } from './core/RAG.ts';
 
 // Reliability utilities
 export {

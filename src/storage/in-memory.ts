@@ -3,30 +3,16 @@
 // No dependencies, suitable for prototyping and testing.
 // ============================================================
 
-import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
+import type { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
 import { NoopLogger } from '../logger/index.ts';
 import * as fs from 'node:fs/promises';
-
-interface StoredRecord {
-  id: string;
-  embedding: number[];
-  metadata: Metadata;
-}
+import { matchesFilter, cosineSimilarity, type StoredRecord, type SerializableStore } from './shared.ts';
 
 /** Configuration for InMemoryVectorStore */
 export interface InMemoryVectorStoreConfig {
   /** Optional logger for warnings and diagnostics */
   logger?: Logger;
-}
-
-/** Serializable format with embedded schema metadata */
-interface SerializableStore {
-  _meta: Omit<VectorStoreSchemaMetadata, 'createdAt' | 'updatedAt'> & {
-    createdAt: string;
-    updatedAt: string;
-  };
-  records: StoredRecord[];
 }
 
 export class InMemoryVectorStore implements VectorStore {
@@ -56,7 +42,7 @@ export class InMemoryVectorStore implements VectorStore {
     }
 
     const dim = embeddings[0]?.length;
-    
+
     // Validate all new embeddings have consistent dimensions
     for (const emb of embeddings) {
       if (emb.length !== dim) {
@@ -89,7 +75,7 @@ export class InMemoryVectorStore implements VectorStore {
     const idSet = new Set<string>();
     for (let i = 0; i < embeddings.length; i++) {
       const id = ids?.[i] ?? crypto.randomUUID();
-      
+
       // Check for duplicate ID in batch
       if (idSet.has(id)) {
         if (options?.replaceDuplicates) {
@@ -100,7 +86,7 @@ export class InMemoryVectorStore implements VectorStore {
         // Skip silently to prevent accidental duplicates
         continue;
       }
-      
+
       // Check if ID already exists in store
       const existingIndex = this.records.findIndex(r => r.id === id);
       let wasReplaced = false;
@@ -118,9 +104,9 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
-      
+
       idSet.add(id);
-      
+
       // Only push if not replaced
       if (!wasReplaced) {
         this.records.push({
@@ -206,7 +192,7 @@ export class InMemoryVectorStore implements VectorStore {
     if (parsed && typeof parsed === 'object' && '_meta' in parsed) {
       // New format with schema metadata
       const typed = parsed as SerializableStore;
-      
+
       if (!typed._meta || !Array.isArray(typed.records)) {
         throw new VectorStoreError('Corrupt store: invalid schema structure');
       }
@@ -230,8 +216,8 @@ export class InMemoryVectorStore implements VectorStore {
         throw new VectorStoreError('Cannot determine dimension from empty store');
       }
 
-      const firstDim = Array.isArray(parsed[0]?.embedding) 
-        ? (parsed[0].embedding as number[]).length 
+      const firstDim = Array.isArray(parsed[0]?.embedding)
+        ? (parsed[0].embedding as number[]).length
         : 0;
 
       meta = {
@@ -287,31 +273,4 @@ export class InMemoryVectorStore implements VectorStore {
   get size(): number {
     return this.records.length;
   }
-}
-
-function matchesFilter(metadata: Metadata, filter: Filter): boolean {
-  for (const [key, value] of Object.entries(filter)) {
-    if (metadata[key] !== value) return false;
-  }
-  return true;
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new VectorStoreError(
-      `Embedding dimension mismatch: ${a.length} vs ${b.length}`,
-    );
-  }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }

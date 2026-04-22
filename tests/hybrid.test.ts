@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { fuseResults, reciprocalRankFusion, DEFAULT_HYBRID_CONFIG } from '../src/search/hybrid.js';
-import { SearchResult } from '../src/types/index.js';
-import { BM25SearchResult } from '../src/search/bm25.js';
+import { fuseResults, reciprocalRankFusion, DEFAULT_HYBRID_CONFIG } from '../src/search/hybrid.ts';
+import { SearchResult } from '../src/types/index.ts';
+import { SparseSearchResult } from '../src/types/index.ts';
 
 describe('Hybrid Search Fusion', () => {
   const denseResults: SearchResult[] = [
@@ -11,7 +11,7 @@ describe('Hybrid Search Fusion', () => {
     { id: '5', content: 'doc 5', score: 0.3, metadata: {} },
   ];
 
-  const sparseResults: BM25SearchResult[] = [
+  const sparseResults: SparseSearchResult[] = [
     { id: '2', content: 'doc 2', score: 10.0, metadata: {} },
     { id: '3', content: 'doc 3', score: 8.0, metadata: {} },
     { id: '4', content: 'doc 4', score: 5.0, metadata: {} },

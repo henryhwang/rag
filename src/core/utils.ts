@@ -2,7 +2,7 @@
 // Core utilities
 // ============================================================
 
-import { DocumentInfo } from '../types/index.ts';
+import { type DocumentInfo } from '../types/index.ts';
 import { v4 as uuidv4 } from 'uuid';
 
 /** Generate a unique document ID. */

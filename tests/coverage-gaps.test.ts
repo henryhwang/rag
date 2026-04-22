@@ -1,11 +1,11 @@
 import { describe, it, expect } from "bun:test";
-import { OpenAICompatibleEmbeddings } from "../src/embeddings/index.js";
-import { SimpleQueryRewriter } from "../src/query/rewrite/simple-rewriter.js";
-import { TextParser } from "../src/parsers/index.js";
-import { LLMQueryRewriter } from "../src/query/rewrite/llm-rewriter.js";
-import { QueryError } from "../src/errors/index.js";
-import { OpenAICompatibleReranker } from "../src/reranking/openai-compatible.js";
-import { RerankError } from "../src/errors/index.js";
+import { OpenAICompatibleEmbeddings } from "../src/embeddings/index.ts";
+import { SimpleQueryRewriter } from "../src/query/rewrite/simple-rewriter.ts";
+import { TextParser } from "../src/parsers/index.ts";
+import { LLMQueryRewriter } from "../src/query/rewrite/llm-rewriter.ts";
+import { QueryError } from "../src/errors/index.ts";
+import { OpenAICompatibleReranker } from "../src/reranking/openai-compatible.ts";
+import { RerankError } from "../src/errors/index.ts";
 
 describe("Coverage: getters and small methods", () => {
   it("OpenAICompatibleEmbeddings.dimensions returns configured value", () => {

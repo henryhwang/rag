@@ -4,7 +4,7 @@
 // With retry, timeout support and enhanced error messages
 // ============================================================
 
-import { LLMProvider, LLMOptions } from '../types/index.ts';
+import type { LLMProvider, LLMOptions } from '../types/index.ts';
 import { LLMError } from '../errors/index.ts';
 import { retryAsync } from '../utils/retry.ts';
 
@@ -102,12 +102,12 @@ export class OpenAICompatibleLLM implements LLMProvider {
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '');
       const retryAfter = response.headers.get('Retry-After');
-      
+
       let troubleshooting = [
         'Check API key validity',
         `Verify quota/credits for model: ${model}`,
       ];
-      
+
       if (response.status === 429) {
         troubleshooting.unshift(`Rate limit exceeded${retryAfter ? `. Retry after: ${retryAfter}s` : ''}`);
       } else if (response.status >= 500) {
@@ -115,7 +115,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
       } else if (response.status === 401 || response.status === 403) {
         troubleshooting.unshift('Authentication failed - verify API key is correct');
       }
-      
+
       throw new LLMError(
         `LLM API returned HTTP ${response.status}${bodyText ? ': ' + bodyText.substring(0, 150) : ''}.\n` +
         `Endpoint: ${url}\n` +

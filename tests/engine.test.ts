@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'bun:test';
-import { QueryEngine, QueryEngineConfig } from '../src/query/engine.js';
-import { BM25Index } from '../src/search/bm25.js';
-import { NoopLogger } from '../src/logger/index.js';
-import type { EmbeddingProvider, VectorStore, Metadata, SearchResult } from '../src/types/index.js';
+import { QueryEngine, QueryEngineConfig } from '../src/query/engine.ts';
+import { MockSparseSearchProvider } from './utils/mock-sparse.ts'
+import { NoopLogger } from '../src/logger/index.ts';
+import type { EmbeddingProvider, VectorStore, Metadata, SearchResult } from '../src/types/index.ts';
+import { afterEach, beforeEach } from 'node:test';
 
 // -- Mock implementations -------------------------------------------
 
@@ -155,35 +156,41 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('sparse search (BM25)', () => {
-    it('searches BM25 index when mode is sparse', async () => {
-      const bm25 = new BM25Index();
-      bm25.addDocuments([
+  describe('sparse search', () => {
+    let mockSparse: MockSparseSearchProvider
+
+    beforeEach(() => {
+      mockSparse = new MockSparseSearchProvider();
+    });
+
+    afterEach(() => { mockSparse.reset() })
+
+    it('searches index when mode is sparse', async () => {
+      mockSparse.addDocuments([
         { id: 'c1', content: 'TypeScript is a typed language', metadata: { documentId: 'doc1', chunkIndex: 0 } },
         { id: 'c2', content: 'Python is a dynamic language', metadata: { documentId: 'doc2', chunkIndex: 0 } },
       ]);
 
-      const engine = createTestEngine({ bm25 });
+      const engine = createTestEngine({ sparseSearch: mockSparse });
       const result = await engine.query('TypeScript', { searchMode: 'sparse' });
       expect(result.context.length).toBeGreaterThan(0);
       expect(result.searchMode).toBe('sparse');
     });
 
-    it('throws when BM25 index is not configured', async () => {
+    it('throws when search index is not configured', async () => {
       const engine = createTestEngine();
-      await expect(engine.query('test', { searchMode: 'sparse' })).rejects.toThrow(
-        'BM25 index is required',
+      expect(engine.query('test', { searchMode: 'sparse' })).rejects.toThrow(
+        'Sparse search provider is required',
       );
     });
 
     it('returns keyword-matching results', async () => {
-      const bm25 = new BM25Index();
-      bm25.addDocuments([
+      mockSparse.addDocuments([
         { id: 'c1', content: 'how to configure API endpoints', metadata: {} },
         { id: 'c2', content: 'the weather is nice today', metadata: {} },
       ]);
 
-      const engine = createTestEngine({ bm25 });
+      const engine = createTestEngine({ sparseSearch: mockSparse });
       const result = await engine.query('configure API', { searchMode: 'sparse', topK: 1 });
       expect(result.context.length).toBeGreaterThan(0);
       expect(result.context[0].content).toContain('API');
@@ -191,6 +198,14 @@ describe('QueryEngine', () => {
   });
 
   describe('hybrid search', () => {
+    let mockSparse: MockSparseSearchProvider
+
+    beforeEach(() => {
+      mockSparse = new MockSparseSearchProvider();
+    });
+
+    afterEach(() => { mockSparse.reset() })
+
     it('combines dense and sparse results', async () => {
       const vs = new MockVectorStore();
       const embeddings = new MockEmbeddingProvider();
@@ -202,22 +217,21 @@ describe('QueryEngine', () => {
         ['c1', 'c2'],
       );
 
-      const bm25 = new BM25Index();
-      bm25.addDocuments([
+      mockSparse.addDocuments([
         { id: 'c1', content: 'API configuration guide', metadata: {} },
         { id: 'c2', content: 'database optimization tips', metadata: {} },
       ]);
 
-      const engine = createTestEngine({ vectorStore: vs, bm25 });
+      const engine = createTestEngine({ vectorStore: vs, sparseSearch: mockSparse });
       const result = await engine.query('API configuration', { searchMode: 'hybrid', topK: 5 });
       expect(result.context.length).toBeGreaterThan(0);
       expect(result.searchMode).toBe('hybrid');
     });
 
-    it('throws when BM25 index is not configured for hybrid', async () => {
+    it('throws when search index is not configured for hybrid', async () => {
       const engine = createTestEngine();
-      await expect(engine.query('test', { searchMode: 'hybrid' })).rejects.toThrow(
-        'BM25 index is required',
+      expect(engine.query('test', { searchMode: 'hybrid' })).rejects.toThrow(
+        'Sparse search provider is required',
       );
     });
 
@@ -232,13 +246,12 @@ describe('QueryEngine', () => {
         ['c1', 'c2'],
       );
 
-      const bm25 = new BM25Index();
-      bm25.addDocuments([
+      mockSparse.addDocuments([
         { id: 'c1', content: 'API config', metadata: {} },
         { id: 'c2', content: 'database tips', metadata: {} },
       ]);
 
-      const engineHeavyDense = createTestEngine({ vectorStore: vs, bm25 });
+      const engineHeavyDense = createTestEngine({ vectorStore: vs, sparseSearch: mockSparse });
       const result = await engineHeavyDense.query('API', {
         searchMode: 'hybrid',
         denseWeight: 0.9,
@@ -343,23 +356,30 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('syncBM25', () => {
-    it('adds documents to BM25 index', () => {
-      const bm25 = new BM25Index();
-      const engine = createTestEngine({ bm25 });
+  describe('syncSparseSearch', () => {
+    let mockSparse: MockSparseSearchProvider
 
-      engine.syncBM25([
+    beforeEach(() => {
+      mockSparse = new MockSparseSearchProvider();
+    });
+
+    afterEach(() => { mockSparse.reset() })
+
+    it('adds documents to sparse search index', () => {
+      const engine = createTestEngine({ sparseSearch: mockSparse });
+
+      engine.syncSparseSearch([
         { id: '1', content: 'hello world', metadata: {} },
         { id: '2', content: 'foo bar', metadata: {} },
       ]);
 
-      expect(bm25.size).toBe(2);
+      expect(mockSparse.size).toBe(2);
     });
 
-    it('does nothing when BM25 is not configured', () => {
+    it('does nothing when sparse search provider is not configured', () => {
       const engine = createTestEngine();
       // Should not throw
-      engine.syncBM25([{ id: '1', content: 'hello', metadata: {} }]);
+      engine.syncSparseSearch([{ id: '1', content: 'hello', metadata: {} }]);
     });
   });
 
@@ -429,7 +449,7 @@ describe('QueryEngine', () => {
       };
 
       const engine = createTestEngine({ vectorStore: vs, reranker: mockReranker as any });
-      await expect(engine.query('test', { rerank: true })).rejects.toThrow('Reranking failed');
+      expect(engine.query('test', { rerank: true })).rejects.toThrow('Reranking failed');
     });
   });
 });

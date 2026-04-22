@@ -4,7 +4,7 @@
 // chunker can split on headings / paragraphs.
 // ============================================================
 
-import { FileInput, ParsedDocument } from '../types/index.ts';
+import type { FileInput, ParsedDocument } from '../types/index.ts';
 import { ParseError } from '../errors/index.ts';
 import { BaseDocumentParser } from './base.ts';
 import * as path from 'node:path';

@@ -76,7 +76,6 @@ interface StrategyDecision {
 }
 
 export function getChunkingRecommendation(
-  contentType: string,
   content: string,
 ): StrategyDecision {
   const lines = content.split('\n');
@@ -171,7 +170,7 @@ async function main() {
     console.log('─'.repeat(70));
 
     const content = SAMPLE_DOCUMENTS[config.key];
-    const decision = getChunkingRecommendation(config.name, content);
+    const decision = getChunkingRecommendation(content);
 
     console.log(`Recommended Strategy: ${decision.strategy.toUpperCase()}`);
     console.log(`Chunk Size: ${decision.recommendedSize} | Overlap: ${decision.recommendedOverlap}`);

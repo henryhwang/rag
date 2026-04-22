@@ -2,7 +2,7 @@
 // Parser factory — selects the right parser by file extension
 // ============================================================
 
-import { DocumentParser, FileInput, ParsedDocument } from '../types/index.ts';
+import type { DocumentParser, FileInput, ParsedDocument } from '../types/index.ts';
 import { ParseError } from '../errors/index.ts';
 import { BaseDocumentParser } from './base.ts';
 import { TextParser } from './text.ts';

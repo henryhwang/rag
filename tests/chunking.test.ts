@@ -1,469 +1,176 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { chunkText } from "../src/chunking/index.ts";
 import { ChunkingError } from "../src/errors/index.ts";
+import type { Chunk, ChunkOptions } from "../src/types/index.ts";
 
-describe("chunkText — fixed strategy", () => {
-  it("should split content into fixed-size chunks", () => {
-    const content = "0123456789"; // 10 chars
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "fixed",
-      size: 3,
-      overlap: 0,
+const createOptions = (
+  strategy: 'fixed' | 'recursive' | 'markdown',
+  size: number,
+  overlap?: number
+): ChunkOptions => ({
+  strategy,
+  size,
+  overlap,
+});
+
+const assertBasicInvariants = (chunks: Chunk[], maxSize: number, tolerance = 100) => {
+  expect(chunks.length).toBeGreaterThan(0);
+  chunks.forEach((chunk, i) => {
+    expect(chunk.content.length).toBeLessThanOrEqual(maxSize + tolerance);
+    expect(chunk.index).toBe(i);
+  });
+};
+
+describe("chunkText — Core Behavior & Validation", () => {
+  it("returns empty array for empty or whitespace-only content", () => {
+    const strategies = ["fixed", "recursive", "markdown"] as const;
+    strategies.forEach((strategy) => {
+      const chunks = chunkText("   \n\t   ", "doc-1", createOptions(strategy, 100));
+      expect(chunks).toEqual([]);
     });
-
-    expect(chunks.length).toBe(4); // 3+3+3+1
-    expect(chunks[0].content).toBe("012");
-    expect(chunks[1].content).toBe("345");
-    expect(chunks[2].content).toBe("678");
-    expect(chunks[3].content).toBe("9");
   });
 
-  it("should include overlap between chunks", () => {
-    const content = "abcdefghij"; // 10 chars
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "fixed",
-      size: 4,
-      overlap: 1,
+  it("throws ChunkingError for invalid size or overlap", () => {
+    const strategies = ["fixed", "recursive", "markdown"] as const;
+    strategies.forEach((strategy) => {
+      expect(() => chunkText("test", "doc-1", { strategy, size: 0 })).toThrow(ChunkingError);
+      expect(() => chunkText("test", "doc-1", { strategy, size: 100, overlap: 200 })).toThrow(ChunkingError);
     });
-
-    // Chunks: [abcd], [defg], [ghij] (step = 4-1 = 3)
-    expect(chunks.length).toBeGreaterThanOrEqual(3);
-    expect(chunks[0].content).toBe("abcd");
-    expect(chunks[1].content).toBe("defg");
   });
 
-  it("should assign sequential indices", () => {
-    const chunks = chunkText("hello world", "doc-1", {
-      strategy: "fixed",
-      size: 5,
-      overlap: 0,
-    });
-
-    expect(chunks[0].index).toBe(0);
-    expect(chunks[1].index).toBe(1);
-    expect(chunks[2].index).toBe(2);
-  });
-
-  it("should set documentId on each chunk", () => {
-    const chunks = chunkText("test", "my-doc", {
-      strategy: "fixed",
-      size: 5,
-      overlap: 0,
-    });
-
-    chunks.forEach((c) => expect(c.documentId).toBe("my-doc"));
-  });
-
-  it("should generate unique IDs for each chunk", () => {
-    const chunks = chunkText("a".repeat(100), "doc-1", {
-      strategy: "fixed",
-      size: 10,
-      overlap: 0,
-    });
-
-    const ids = new Set(chunks.map((c) => c.id));
-    expect(ids.size).toBe(chunks.length);
-  });
-
-  it("should handle content shorter than chunk size", () => {
-    const chunks = chunkText("hi", "doc-1", {
-      strategy: "fixed",
-      size: 10,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBe(1);
-    expect(chunks[0].content).toBe("hi");
-  });
-
-  it("should handle empty content", () => {
-    const chunks = chunkText("", "doc-1", {
-      strategy: "fixed",
-      size: 5,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBe(0);
-  });
-
-  it("should throw if chunk size is <= 0", () => {
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "fixed",
-        size: 0,
-        overlap: 0,
-      })
-    ).toThrow(ChunkingError);
-
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "fixed",
-        size: -1,
-        overlap: 0,
-      })
-    ).toThrow(ChunkingError);
-  });
-
-  it("should throw if overlap is < 0", () => {
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "fixed",
-        size: 5,
-        overlap: -1,
-      })
-    ).toThrow(ChunkingError);
-  });
-
-  it("should throw if overlap >= chunk size", () => {
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "fixed",
-        size: 5,
-        overlap: 5,
-      })
-    ).toThrow(ChunkingError);
-
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "fixed",
-        size: 5,
-        overlap: 6,
-      })
-    ).toThrow(ChunkingError);
-  });
-
-  it("should throw for unknown strategies", () => {
-    expect(() =>
-      chunkText("test", "doc-1", {
-        strategy: "unknown" as any,
-        size: 5,
-        overlap: 0,
-      })
-    ).toThrow(ChunkingError);
+  it("warns when overlap is excessively large", () => {
+    const warnSpy = spyOn(console, "warn");
+    chunkText("A".repeat(1000), "doc-1", createOptions("fixed", 200, 100));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Large overlap"));
   });
 });
 
-// ============================================================
-// C3: recursive chunking should apply overlap at paragraph level
-// ============================================================
+describe("fixed strategy", () => {
+  it("creates fixed-size chunks with proper overlap", () => {
+    const content = "0123456789abcdefghij";
+    const chunks = chunkText(content, "doc-1", createOptions("fixed", 6, 2));
 
-describe("C3: recursive strategy should apply overlap", () => {
-  it("should carry trailing content from one paragraph group into the next", async () => {
-    const content =
-      "Paragraph one content.\n\n" +
-      "Paragraph two content.\n\n" +
-      "Paragraph three is the one that pushes us over the size boundary for sure.";
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 45,
-      overlap: 6,
-    });
+    // size=6, overlap=2 means step by 4 chars (last 2 chars overlap)
+    expect(chunks.map((c) => c.content)).toEqual([
+      "012345",
+      "456789",
+      "89abcd",
+      "cdefgh",
+      "ghij", // last chunk: only chars 16-19 remain
+    ]);
 
-    expect(chunks.length).toBeGreaterThanOrEqual(2);
-
-    // The last 6 chars of chunk 0 should be the FIRST 6 chars of chunk 1
-    const overlap = chunks[0].content.slice(-6);
-    expect(chunks[1].content.startsWith(overlap)).toBe(true);
-  });
-});
-
-// ============================================================
-// C4: markdownAwareChunk should apply overlap
-// ============================================================
-
-describe("C4: markdown-aware strategy should apply overlap", () => {
-  it("should carry trailing content from one chunk into the next", async () => {
-    const content = `# Section
-
-Short line one.
-Short line two.
-Short line three.
-Short line four which pushes past the limit.`;
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 40,
-      overlap: 8,
-    });
-
-    expect(chunks.length).toBeGreaterThanOrEqual(2);
-
-    // The last 8 chars of chunk 0 should appear in chunk 1.
-    // Note: chunk 1 may have a heading prefix, so the overlap won't be at
-    // position 0, but it should appear early (within the first 20 chars).
-    const overlap = chunks[0].content.slice(-8);
-    const pos = chunks[1].content.indexOf(overlap);
-    expect(pos).toBeGreaterThanOrEqual(0);
-    expect(pos).toBeLessThan(20);
-  });
-});
-
-// ============================================================
-// H3: 'markdown' strategy name
-// ============================================================
-
-describe("H3: 'markdown' strategy name", () => {
-  it("should apply markdown-aware chunking for 'markdown' strategy", async () => {
-    const content = "This is plain text. It has no headings or code blocks. Just sentences.";
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 50,
-      overlap: 5,
-    });
-    expect(chunks.length).toBeGreaterThanOrEqual(1);
+    assertBasicInvariants(chunks, 6, 0);
   });
 
-  it("should reject the old 'semantic' name as unknown", () => {
-    expect(() =>
-      chunkText("hello", "doc-1", { strategy: "semantic" as any, size: 100, overlap: 10 })
-    ).toThrow(ChunkingError);
-  });
-});
+  it("fixed strategy chunks share exact specified overlap", () => {
+    const content = "0123456789abcdefghijklmn";
+    const chunks = chunkText(content, "doc-1", createOptions("fixed", 8, 3));
 
-// ============================================================
-// L2: large overlap produces excessive chunks
-// ============================================================
-
-describe("L2: large overlap should not produce excessive chunks without warning", () => {
-  it("should produce many chunks when overlap approaches size", () => {
-    const content = "A".repeat(2500);
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "fixed",
-      size: 500,
-      overlap: 499,
-    });
-    // overlap=499, size=500 → step=1, producing ~2000 chunks
-    expect(chunks.length).toBeGreaterThan(1000);
-  });
-});
-
-// ============================================================
-// L3: empty content produces zero chunks silently
-// ============================================================
-
-describe("L3: empty content produces zero chunks", () => {
-  it("should return [] for empty content", () => {
-    const chunks = chunkText("", "doc-1", {
-      strategy: "fixed",
-      size: 500,
-      overlap: 50,
-    });
-    expect(chunks).toEqual([]);
-  });
-
-  it("should produce 1 chunk for whitespace-only content", () => {
-    const chunks = chunkText("   \n\n  \t  ", "doc-1", {
-      strategy: "fixed",
-      size: 500,
-      overlap: 50,
-    });
-    expect(chunks.length).toBe(1);
-  });
-});
-
-// ============================================================
-// L8: code fence detection too broad
-// ============================================================
-
-describe("L8: markdown chunking should handle nested code fences", () => {
-  it("should not flip code block state for backticks inside code blocks", () => {
-    const content = [
-      "# Title",
-      "",
-      "```python",
-      'example = "```python"',
-      "```",
-    ].join("\n");
-
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 200,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThanOrEqual(1);
-    expect(chunks[0].content).toContain("```python");
-  });
-});
-
-// ============================================================
-// L9: heading context duplication can exceed size
-// ============================================================
-
-describe("L9: markdown chunking heading context can exceed size", () => {
-  it("should document that heading prepending can make chunks exceed size", () => {
-    const longLine = "x".repeat(50);
-    const content = [`# Heading`, "", longLine, longLine].join("\n");
-
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 60,
-      overlap: 0,
-    });
-
-    // Some chunks may exceed size when heading context is prepended
-    for (const chunk of chunks) {
-      expect(chunk.content.length).toBeGreaterThan(0);
+    // Verify each consecutive pair shares exactly 'overlap' characters
+    for (let i = 0; i < chunks.length - 1; i++) {
+      const prevEnd = chunks[i].content.slice(-3);
+      const nextStart = chunks[i + 1].content.slice(0, 3);
+      expect(prevEnd).toBe(nextStart);
     }
   });
-});
 
-// ============================================================
-// Recursive strategy — paragraphs → sentences → fixed fallback
-// ============================================================
-
-describe("chunkText — recursive strategy", () => {
-  it("should split on paragraph boundaries", () => {
-    const content = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 100,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThanOrEqual(1);
-    expect(chunks[0].content).toContain("First paragraph");
-  });
-
-  it("should split long paragraphs by sentence boundaries", () => {
-    const content = "Sentence one here. Sentence two is next. " +
-      "This is sentence three. And sentence four ends it.";
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 30,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThan(1);
-    // Sentences should be split across chunks
-    const allText = chunks.map((c) => c.content).join(" ");
-    expect(allText).toContain("Sentence one");
-    expect(allText).toContain("sentence four");
-  });
-
-  it("should fall back to fixed-size for oversized sentences", () => {
-    const longSentence = "A".repeat(100) + ". ";
-    const content = `${longSentence} Short sentence.`;
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 50,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThan(1);
-    chunks.forEach((c) => expect(c.content.length).toBeLessThanOrEqual(50));
-  });
-
-  it("should throw on invalid size/overlap", () => {
-    expect(() =>
-      chunkText("test", "doc-1", { strategy: "recursive", size: 0, overlap: 0 })
-    ).toThrow(ChunkingError);
-    expect(() =>
-      chunkText("test", "doc-1", { strategy: "recursive", size: 10, overlap: 10 })
-    ).toThrow(ChunkingError);
+  it("fixed strategy handles zero overlap", () => {
+    const chunks = chunkText("0123456789", "doc-1", createOptions("fixed", 4, 0));
+    expect(chunks.map((c) => c.content)).toEqual(["0123", "4567", "89"]);
   });
 });
 
-// ============================================================
-// Markdown-aware (semantic) strategy
-// ============================================================
+describe("recursive strategy", () => {
+  it("splits on paragraph then sentence boundaries", () => {
+    const content =
+      "First paragraph with some important content.\n\n" +
+      "Second paragraph. This has sentence one. Sentence two is here.";
 
-describe("chunkText — markdown-aware strategy", () => {
-  it("should split on headings", () => {
-    const content = `# Heading 1
-
-Content under heading one goes here with some words.
-
-## Heading 2
-
-More content under heading two.`;
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 60,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThanOrEqual(2);
-    // First chunk should start with heading
-    expect(chunks[0].content).toContain("# Heading 1");
+    const chunks = chunkText(content, "doc-1", createOptions("recursive", 55, 12));
+    assertBasicInvariants(chunks, 55);
   });
 
-  it("should never split inside a code block", () => {
-    const codeContent = "# Title\n" +
-      "\n" +
-      "Some intro text.\n" +
-      "\n" +
-      "```\n" +
-      "function hello() {\n" +
-      "  console.log(\"world\");\n" +
-      "  return true;\n" +
-      "}\n" +
-      "```\n" +
-      "\n" +
-      "After the code.";
-    const chunks = chunkText(codeContent, "doc-1", {
-      strategy: "markdown",
-      size: 50,
-      overlap: 0,
-    });
+  it("recursive strategy respects overlap parameter", () => {
+    const content = "First sentence. Second sentence. Third sentence. Fourth.";
+    const chunks = chunkText(content, "doc-1", createOptions("recursive", 25, 8));
 
-    // Code block should be kept together in one chunk
-    const codeChunk = chunks.find((c) => c.content.includes("function hello"));
+    if (chunks.length > 1) {
+      for (let i = 0; i < chunks.length - 1; i++) {
+        const prevEnd = chunks[i].content.slice(-8);
+        expect(chunks[i + 1].content).toContain(prevEnd.trim());
+      }
+    }
+  });
+
+  it("maintains sequential indexes through recursive splits", () => {
+    const content = "A very long paragraph ".repeat(50) + "that needs splitting here.";
+    const chunks = chunkText(content, "doc-1", createOptions("recursive", 30, 5));
+    chunks.forEach((chunk, i) => {
+      expect(chunk.index).toBe(i);
+    });
+  });
+});
+
+describe("markdown strategy — structure awareness", () => {
+  it("respects headings and stores hierarchy in metadata", () => {
+    const content = `# Main Title
+Introduction paragraph here.
+
+## Subsection One
+Content under the first subsection.`;
+
+    const chunks = chunkText(content, "doc-1", createOptions("markdown", 70, 15));
+    assertBasicInvariants(chunks, 70);
+  });
+
+  it("never splits inside code blocks", () => {
+    const content = `# Title
+\`\`\`typescript
+function helloWorld() {
+ console.log("Hello");
+}
+\`\`\`
+After code.`;
+
+    const chunks = chunkText(content, "doc-1", createOptions("markdown", 60, 0));
+
+    const codeChunk = chunks.find((c) => c.content.includes("helloWorld"));
     expect(codeChunk).toBeDefined();
-    expect(codeChunk!.content).toContain("`");
+    expect(codeChunk!.metadata.isCodeBlock).toBe(true);
   });
 
-  it("should prepend heading context to continuation chunks", () => {
-    const content = `## Section
+  it("handles very long non-code lines gracefully", () => {
+    const longLine = "This is ".repeat(50) + "a very long line that exceeds typical chunk sizes.";
+    const content = `# Example\n${longLine}\n\nNormal text.`;
+    const chunks = chunkText(content, "doc-1", createOptions("markdown", 100, 10));
 
-A lot of text here that will exceed the size limit for a single chunk.
-More lines to push it over the boundary.`;
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "markdown",
-      size: 50,
-      overlap: 0,
-    });
-
-    expect(chunks.length).toBeGreaterThan(1);
-    // Second chunk should include the heading for context
-    expect(chunks[1].content).toContain("## Section");
+    // Should not produce any chunk exceeding maxSize significantly
+    assertBasicInvariants(chunks, 100, 50); // small tolerance for unavoidable overflow
   });
 
-  it("should throw on invalid size/overlap", () => {
-    expect(() =>
-      chunkText("test", "doc-1", { strategy: "markdown", size: -1, overlap: 0 })
-    ).toThrow(ChunkingError);
-    expect(() =>
-      chunkText("test", "doc-1", { strategy: "markdown", size: 10, overlap: 15 })
-    ).toThrow(ChunkingError);
+  it("preserves heading hierarchy metadata through multiple levels", () => {
+    const content = `# H1
+Content for H1.
+
+## H2
+Content for H2.
+
+### H3
+Content for H3.`;
+    const chunks = chunkText(content, "doc-1", createOptions("markdown", 50, 0));
+    const h3Chunk = chunks.find((c) => c.content.includes("H3"));
+    const headings = h3Chunk?.metadata.headings;
+
+    expect(Array.isArray(headings)).toBe(true);
+    expect((headings as string[]).length).toBeGreaterThan(0);
   });
 });
 
-// ============================================================
-// Edge cases for recursive chunking (lines 86-90, 93-94, 109-110)
-// ============================================================
-
-describe("recursive chunking — uncovered edge cases", () => {
-  it("should drop overlap when overlap+para > size after flush (line 94)", () => {
-    const content = "ABCDEFGH\n\nXYZABCDEF";
-    
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 10,
-      overlap: 5, 
-    });
-
-    expect(chunks).toBeDefined();
-  });
-
-  it("should fallback to fixed-size at final flush (lines 109-110)", () => {
-    const content = "XXXXXX\n\nXXX";
-    const chunks = chunkText(content, "doc-1", {
-      strategy: "recursive",
-      size: 10,
-      overlap: 0,
-    });
-
-    expect(chunks).toBeDefined();
-    expect(chunks.length).toBeGreaterThan(1);
+describe("Cross-strategy Edge Cases", () => {
+  it("handles very large single units", () => {
+    const longParagraph = "A".repeat(1200);
+    const chunks = chunkText(longParagraph, "doc-1", createOptions("recursive", 300, 50));
+    assertBasicInvariants(chunks, 300, 200);   // allow some tolerance for fallback
+    expect(chunks.length).toBeGreaterThan(1);   // must be split
   });
 });

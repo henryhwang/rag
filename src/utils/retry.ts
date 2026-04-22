@@ -29,11 +29,14 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
 };
 
 export class RetryError extends RAGError {
+  private readonly lastError;
+
   constructor(
     message: string,
-    private readonly lastError: Error,
+    lastError: Error,
   ) {
     super(message);
+    this.lastError = lastError;
     this.name = 'RetryError';
     this.cause = lastError;
   }

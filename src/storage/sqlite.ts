@@ -5,25 +5,11 @@
 // ============================================================
 
 import { createClient, type Client } from '@libsql/client';
-import { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
+import type { VectorStore, Metadata, SearchResult, Filter, VectorStoreSchemaMetadata, Logger } from '../types/index.ts';
 import { VectorStoreError } from '../errors/index.ts';
 import { NoopLogger } from '../logger/index.ts';
 import * as fs from 'node:fs/promises';
-
-interface StoredRecord {
-  id: string;
-  embedding: number[];
-  metadata: Metadata;
-}
-
-/** Serializable format with embedded schema metadata */
-interface SerializableStore {
-  _meta: Omit<VectorStoreSchemaMetadata, 'createdAt' | 'updatedAt'> & {
-    createdAt: string;
-    updatedAt: string;
-  };
-  records: StoredRecord[];
-}
+import { matchesFilter, cosineSimilarity, type StoredRecord, type SerializableStore } from './shared.ts';
 
 export interface SQLiteVectorStoreConfig {
   /**
@@ -51,7 +37,7 @@ export class SQLiteVectorStore implements VectorStore {
 
   constructor(config?: SQLiteVectorStoreConfig) {
     this.url = config?.url ?? DEFAULT_URL;
-    
+
     const tableName = config?.tableName ?? DEFAULT_TABLE_NAME;
     // Validate table name to prevent SQL injection
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
@@ -106,7 +92,7 @@ export class SQLiteVectorStore implements VectorStore {
   /** Load schema metadata from _schema table, or create default if not exists */
   private async loadSchemaMetadata(): Promise<void> {
     const client = this.client!;
-    
+
     const result = await client.execute('SELECT COUNT(*) as cnt FROM _schema');
     const count = result.rows[0]?.cnt as unknown as number;
 
@@ -156,7 +142,7 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     const dim = embeddings[0]?.length;
-    
+
     // Validate all new embeddings have consistent dimensions
     for (const emb of embeddings) {
       if (emb.length !== dim) {
@@ -167,10 +153,10 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     const client = this.client!;
-    
+
     // Wrap all database operations in a transaction for atomicity
     await client.execute('BEGIN');
-    
+
     try {
       // Initialize or validate dimension against stored schema
       if (!this._metadata || this._metadata.embeddingDimension === 0) {
@@ -195,10 +181,10 @@ export class SQLiteVectorStore implements VectorStore {
       }
 
       const idSet = new Set<string>();
-      
+
       for (let i = 0; i < embeddings.length; i++) {
         const id = ids?.[i] ?? crypto.randomUUID();
-        
+
         // Check for duplicate ID in batch
         if (idSet.has(id)) {
           if (options?.replaceDuplicates) {
@@ -208,7 +194,7 @@ export class SQLiteVectorStore implements VectorStore {
           }
           continue; // Skip duplicate
         }
-        
+
         // Check if ID already exists in store
         const existingRecord = this.records.find(r => r.id === id);
         let wasReplaced = false;
@@ -232,9 +218,9 @@ export class SQLiteVectorStore implements VectorStore {
             continue;
           }
         }
-        
+
         idSet.add(id);
-        
+
         // Only insert new record if not replaced
         if (!wasReplaced) {
           const record: StoredRecord = {
@@ -249,7 +235,7 @@ export class SQLiteVectorStore implements VectorStore {
           });
         }
       }
-      
+
       await client.execute('COMMIT');
     } catch (error) {
       await client.execute('ROLLBACK');
@@ -289,20 +275,21 @@ export class SQLiteVectorStore implements VectorStore {
   async delete(ids: string[]): Promise<void> {
     await this.ensureInitialized();
 
+    if (ids.length === 0) return;
+
     const idSet = new Set(ids);
     this.records = this.records.filter((r) => !idSet.has(r.id));
 
     const client = this.client!;
-    
-    // Wrap multiple DELETE operations in a transaction
+
+    // Batch delete in single query for better performance
     await client.execute('BEGIN');
     try {
-      for (const id of ids) {
-        await client.execute({
-          sql: `DELETE FROM ${this.tableName} WHERE id = ?`,
-          args: [id],
-        });
-      }
+      const placeholders = ids.map(() => '?').join(',');
+      await client.execute({
+        sql: `DELETE FROM ${this.tableName} WHERE id IN (${placeholders})`,
+        args: ids,
+      });
       await client.execute('COMMIT');
     } catch (error) {
       await client.execute('ROLLBACK');
@@ -363,7 +350,7 @@ export class SQLiteVectorStore implements VectorStore {
     if (parsed && typeof parsed === 'object' && '_meta' in parsed) {
       // New format with schema metadata
       const typed = parsed as SerializableStore;
-      
+
       if (!typed._meta || !Array.isArray(typed.records)) {
         throw new VectorStoreError('Corrupt store: invalid schema structure');
       }
@@ -386,8 +373,8 @@ export class SQLiteVectorStore implements VectorStore {
         throw new VectorStoreError('Cannot determine dimension from empty store');
       }
 
-      const firstDim = Array.isArray(parsed[0]?.embedding) 
-        ? (parsed[0].embedding as number[]).length 
+      const firstDim = Array.isArray(parsed[0]?.embedding)
+        ? (parsed[0].embedding as number[]).length
         : 0;
 
       meta = {
@@ -441,10 +428,10 @@ export class SQLiteVectorStore implements VectorStore {
     if (this.client && this.initialized) {
       // Wrap database sync in a transaction for atomicity
       await this.client.execute('BEGIN');
-      
+
       try {
         await this.client.execute({ sql: `DELETE FROM ${this.tableName}`, args: [] });
-        
+
         // Update schema table
         await this.client.execute(
           `UPDATE _schema SET value = ? WHERE key = 'version'`,
@@ -470,7 +457,7 @@ export class SQLiteVectorStore implements VectorStore {
             args: [rec.id, JSON.stringify(rec.embedding), JSON.stringify(rec.metadata)],
           });
         }
-        
+
         await this.client.execute('COMMIT');
       } catch (error) {
         await this.client.execute('ROLLBACK');
@@ -498,37 +485,20 @@ export class SQLiteVectorStore implements VectorStore {
 
   private async loadFromDB(): Promise<void> {
     const result = await this.client!.execute(`SELECT id, embedding, metadata FROM ${this.tableName}`);
-    this.records = result.rows.map((row: Record<string, unknown>) => ({
-      id: row.id as string,
-      embedding: JSON.parse(row.embedding as string) as number[],
-      metadata: JSON.parse(row.metadata as string) as Metadata,
-    }));
+    
+    this.records = result.rows.map((row: Record<string, unknown>, index: number) => {
+      try {
+        return {
+          id: row.id as string,
+          embedding: JSON.parse(row.embedding as string) as number[],
+          metadata: JSON.parse(row.metadata as string) as Metadata,
+        };
+      } catch (error) {
+        throw new VectorStoreError(
+          `Failed to parse record at index ${index}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error instanceof Error ? error : undefined },
+        );
+      }
+    });
   }
-}
-
-function matchesFilter(metadata: Metadata, filter: Filter): boolean {
-  for (const [key, value] of Object.entries(filter)) {
-    if (metadata[key] !== value) return false;
-  }
-  return true;
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new VectorStoreError(
-      `Embedding dimension mismatch: ${a.length} vs ${b.length}`,
-    );
-  }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }

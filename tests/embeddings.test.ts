@@ -1,7 +1,7 @@
 import { describe, it, expect, mock } from "bun:test";
 import { OpenAICompatibleEmbeddings } from "../src/embeddings/index.ts";
 import { EmbeddingError } from "../src/errors/index.ts";
-import { createMockFetch, createMockFetchError } from "./helpers/mock-fetch.ts";
+import { createMockFetch, createMockFetchError } from "./utils/mock-fetch.ts";
 
 describe("OpenAICompatibleEmbeddings — config", () => {
   it("should use defaults", () => {
@@ -23,7 +23,7 @@ describe("OpenAICompatibleEmbeddings — config", () => {
     try {
       delete process.env.OPENAI_API_KEY;
       const emb = new OpenAICompatibleEmbeddings();
-      await expect(emb.embed(["hello"])).rejects.toThrow(EmbeddingError);
+      expect(emb.embed(["hello"])).rejects.toThrow(EmbeddingError);
     } finally {
       if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
     }
@@ -58,7 +58,7 @@ describe("OpenAICompatibleEmbeddings — embed", () => {
       fetchFn: createMockFetch(401, { error: "Unauthorized" }),
     });
 
-    await expect(emb.embed(["text"])).rejects.toThrow(EmbeddingError);
+    expect(emb.embed(["text"])).rejects.toThrow(EmbeddingError);
   });
 
   it("should throw EmbeddingError on network failure", async () => {
@@ -68,7 +68,7 @@ describe("OpenAICompatibleEmbeddings — embed", () => {
       fetchFn: createMockFetchError(new Error("network down")),
     });
 
-    await expect(emb.embed(["text"])).rejects.toThrow(EmbeddingError);
+    expect(emb.embed(["text"])).rejects.toThrow(EmbeddingError);
   });
 
   it("should normalize baseURL by stripping trailing slashes", async () => {
@@ -131,10 +131,10 @@ describe("M6: embedding should validate response length matches input", () => {
       apiKey: "sk-test",
       baseURL: "https://api.example.com/v1",
       fetchFn: createMockFetch(200, {
-          data: [{ embedding: [0.1, 0.2, 0.3] }],
-        }),
+        data: [{ embedding: [0.1, 0.2, 0.3] }],
+      }),
     });
 
-    await expect(emb.embed(["a", "b", "c"])).rejects.toThrow(EmbeddingError);
+    expect(emb.embed(["a", "b", "c"])).rejects.toThrow(EmbeddingError);
   });
 });

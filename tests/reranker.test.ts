@@ -1,6 +1,6 @@
 import { describe, it, expect, mock } from 'bun:test';
-import { createMockFetch } from './helpers/mock-fetch.ts';
-import { OpenAICompatibleReranker } from '../src/reranking/openai-compatible.js';
+import { createMockFetch } from './utils/mock-fetch.ts';
+import { OpenAICompatibleReranker } from '../src/reranking/openai-compatible.ts';
 
 describe('OpenAICompatibleReranker', () => {
   describe('construction', () => {

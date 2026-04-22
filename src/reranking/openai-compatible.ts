@@ -4,7 +4,7 @@
 // With retry, timeout support and enhanced error messages
 // ============================================================
 
-import { Reranker } from '../types/index.ts';
+import { type Reranker } from '../types/index.ts';
 import { RerankError } from '../errors/index.ts';
 import { retryAsync } from '../utils/retry.ts';
 
@@ -51,11 +51,11 @@ export class OpenAICompatibleReranker implements Reranker {
   constructor(config?: OpenAICompatibleRerankerConfig) {
     // Merge defaults with user config
     const merged = { ...DEFAULT_CONFIG, ...config };
-    
+
     // For apiKey: use exactly what's provided, don't auto-fallback to env var
     // This allows testing without env vars and works with free/localhost APIs
     this.apiKey = config?.apiKey ?? '';
-    
+
     this.baseUrl = merged.baseUrl;
     this.model = merged.model;
     this.batchSize = merged.batchSize;
@@ -181,16 +181,16 @@ export class OpenAICompatibleReranker implements Reranker {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       const retryAfter = response.headers.get('Retry-After');
-      
+
       const troubleshooting = [
         'Check API key validity' + (this.apiKey ? '' : ' (no key provided)'),
         `Verify quota/credits for model: ${this.model}`,
       ];
-      
+
       if (response.status === 429) {
         troubleshooting.push(`Rate limit exceeded${retryAfter ? `. Retry after: ${retryAfter}s` : ''}`);
       }
-      
+
       throw new RerankError(
         `Reranking API returned HTTP ${response.status}${text ? ': ' + text.substring(0, 150) : ''}.\n` +
         `Endpoint: ${url}\n` +

@@ -19,6 +19,9 @@
     "declarationMap": true,
     "sourceMap": true,
     "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "types": [
       "node"
     ]

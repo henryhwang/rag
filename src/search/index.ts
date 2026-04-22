@@ -10,10 +10,12 @@ export {
   DEFAULT_BM25_CONFIG,
 } from './bm25.ts';
 
+export type { SparseSearchProvider, SparseDocument, SparseSearchResult } from '../types/index.ts'
+
 export {
   fuseResults,
   reciprocalRankFusion,
-  syncBM25WithStore,
+  syncSparseSearch,
   type HybridSearchConfig,
   DEFAULT_HYBRID_CONFIG,
 } from './hybrid.ts';

@@ -1,7 +1,7 @@
 import { describe, it, expect, mock } from 'bun:test';
-import { DedicatedReranker } from '../src/reranking/dedicatedReranker.js';
-import { RerankError } from '../src/errors/index.js';
-import { createMockFetch } from './helpers/mock-fetch.ts';
+import { DedicatedReranker } from '../src/reranking/dedicatedReranker.ts';
+import { RerankError } from '../src/errors/index.ts';
+import { createMockFetch } from './utils/mock-fetch.ts';
 
 describe('DedicatedReranker', () => {
   describe('construction', () => {

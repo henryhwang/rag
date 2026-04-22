@@ -1,10 +1,9 @@
 // ============================================================
-// Hybrid search — fuses dense (vector) and sparse (BM25) results.
+// Hybrid search — fuses dense (vector) and sparse (keyword/text-based) results.
 // Uses score normalization and weighted combination.
 // ============================================================
 
-import { SearchResult, Metadata } from '../types/index.ts';
-import { BM25Index, BM25SearchResult, BM25Document } from './bm25.ts';
+import type { SearchResult, Metadata, SparseSearchResult, SparseDocument, SparseSearchProvider } from '../types/index.ts';
 
 export interface HybridSearchConfig {
   /** Weight for dense (vector) scores in the fusion, 0–1. Default: 0.5. */
@@ -49,7 +48,7 @@ function normalizeScores(
  */
 export function fuseResults(
   denseResults: SearchResult[],
-  sparseResults: BM25SearchResult[],
+  sparseResults: SparseSearchResult[],
   config: HybridSearchConfig,
   limit: number,
 ): SearchResult[] {
@@ -74,7 +73,7 @@ export function fuseResults(
   for (const r of denseResults) {
     denseMap.set(r.id, r);
   }
-  const sparseMap = new Map<string, BM25SearchResult>();
+  const sparseMap = new Map<string, SparseSearchResult>();
   for (const r of sparseResults) {
     sparseMap.set(r.id, r);
   }
@@ -109,11 +108,11 @@ export function fuseResults(
  *
  * Extracts documents from stored metadata and indexes them for BM25.
  */
-export function syncBM25WithStore(
-  bm25: BM25Index,
-  documents: BM25Document[],
+export function syncSparseSearch(
+  sparseSearch: SparseSearchProvider,
+  documents: SparseDocument[],
 ): void {
-  bm25.addDocuments(documents);
+  sparseSearch.addDocuments(documents);
 }
 
 /**
@@ -126,7 +125,7 @@ export function syncBM25WithStore(
  */
 export function reciprocalRankFusion(
   denseResults: SearchResult[],
-  sparseResults: BM25SearchResult[],
+  sparseResults: SparseSearchResult[],
   limit: number,
   k: number = 60,
 ): SearchResult[] {
@@ -147,7 +146,7 @@ export function reciprocalRankFusion(
 
   const denseMap = new Map<string, SearchResult>();
   for (const r of denseResults) denseMap.set(r.id, r);
-  const sparseMap = new Map<string, BM25SearchResult>();
+  const sparseMap = new Map<string, SparseSearchResult>();
   for (const r of sparseResults) sparseMap.set(r.id, r);
 
   const fused: SearchResult[] = [];

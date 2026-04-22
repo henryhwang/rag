@@ -2,7 +2,7 @@
 // RAG — Main entry point combining all modules
 // ============================================================
 
-import {
+import type {
   RAGConfig,
   ChunkOptions,
   DocumentInfo,
@@ -10,29 +10,19 @@ import {
   QueryWithAnswer,
   QueryOptions,
   Logger,
-  Reranker,
-  QueryRewriter,
 } from '../types/index.ts';
 import { DEFAULT_CHUNK_OPTIONS } from '../types/index.ts';
 import { resolveParser } from '../parsers/index.ts';
 import { chunkText } from '../chunking/index.ts';
-import { QueryEngine, QueryEngineConfig } from '../query/index.ts';
+import { QueryEngine, type QueryEngineConfig } from '../query/index.ts';
 import { createDocumentInfo } from './utils.ts';
 import { NoopLogger } from '../logger/index.ts';
 import { RAGError } from '../errors/index.ts';
-import { BM25Index } from '../search/index.ts';
+import { type SparseSearchProvider } from '../search/index.ts';
 import * as path from 'node:path';
 
-export interface RAGPhase3Config {
-  /** Optional BM25 index for sparse/hybrid search. */
-  bm25?: BM25Index;
-  /** Optional reranker for post-search ranking. */
-  reranker?: Reranker;
-  /** Optional query rewriter for pre-search expansion. */
-  queryRewriter?: QueryRewriter;
-}
-
 export class RAG {
+  private readonly config: RAGConfig;
   private readonly chunkOptions: ChunkOptions;
   private readonly logger: Logger;
   private readonly documents: Map<string, DocumentInfo> = new Map();
@@ -40,15 +30,16 @@ export class RAG {
   private readonly docChunks: Map<string, string[]> = new Map();
   /** Track file paths to detect duplicates. */
   private readonly filePaths: Set<string> = new Set();
-  /** BM25 index for hybrid/sparse search (Phase 3). */
-  private readonly bm25?: BM25Index;
+  /** Sparse search provier for keyword/hybrid search. */
+  private readonly sparseSearch?: SparseSearchProvider;
   private queryEngine: QueryEngine;
 
-  constructor(private readonly config: RAGConfig, phase3?: RAGPhase3Config) {
+  constructor(config: RAGConfig) {
+    this.config = config;
     this.chunkOptions = { ...DEFAULT_CHUNK_OPTIONS, ...config.chunking };
     this.logger = config.logger ?? new NoopLogger();
-    this.bm25 = phase3?.bm25;
-    this.queryEngine = this.createQueryEngine(phase3);
+    this.sparseSearch = config.sparseSearch;
+    this.queryEngine = this.createQueryEngine(config);
   }
 
   // -- Document management -------------------------------------------
@@ -107,9 +98,9 @@ export class RAG {
 
     await this.config.vectorStore.add(embeddings, metadatas, chunkIds);
 
-    // Also index for BM25 if available
-    if (this.bm25) {
-      const bm25Docs = chunks.map((c) => ({
+    // Also index for sparse search if available
+    if (this.sparseSearch) {
+      const sparseSearchDocs = chunks.map((c) => ({
         id: c.id,
         content: c.content,
         metadata: {
@@ -118,7 +109,7 @@ export class RAG {
           chunkIndex: c.index,
         },
       }));
-      this.bm25.addDocuments(bm25Docs);
+      this.sparseSearch.addDocuments(sparseSearchDocs);
     }
 
     // Track only after successful ingest
@@ -143,7 +134,7 @@ export class RAG {
   }
 
   /**
-   * Remove a document and its chunks from the vector store and BM25 index.
+   * Remove a document and its chunks from the vector store and sparse search index.
    */
   async removeDocument(id: string): Promise<void> {
     if (!this.documents.has(id)) {
@@ -152,8 +143,8 @@ export class RAG {
     const chunkIds = this.docChunks.get(id) ?? [];
     if (chunkIds.length > 0) {
       await this.config.vectorStore.delete(chunkIds);
-      // Also remove from BM25
-      this.bm25?.removeDocuments(chunkIds);
+      // Also remove from sparse search
+      this.sparseSearch?.removeDocuments(chunkIds);
     }
     const doc = this.documents.get(id);
     if (doc?.fileName) this.filePaths.delete(doc.fileName);
@@ -349,14 +340,14 @@ This will cause search to fail! To fix:
 
   // -- Private helpers ------------------------------------------------
 
-  private createQueryEngine(phase3?: RAGPhase3Config): QueryEngine {
+  private createQueryEngine(config?: RAGConfig): QueryEngine {
     const opts: QueryEngineConfig = {
       embeddings: this.config.embeddings,
       vectorStore: this.config.vectorStore,
       logger: this.logger,
-      bm25: phase3?.bm25 ?? this.bm25,
-      reranker: phase3?.reranker,
-      queryRewriter: phase3?.queryRewriter,
+      sparseSearch: this.sparseSearch,
+      reranker: config?.reranker,
+      queryRewriter: config?.queryRewriter,
     };
     return new QueryEngine(opts);
   }

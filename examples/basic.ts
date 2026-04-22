@@ -29,9 +29,9 @@ class MockEmbeddings {
 class MockLLM {
   async generate(prompt: string): Promise<string> {
     // Echo back a simulated answer
-    return `[Mock LLM] Based on the context, here is a simulated answer.`;
+    return `[Mock LLM] Based on the context, here is a simulated answer for the query of "${prompt}".`;
   }
-  async *stream(_prompt: string): AsyncIterable<string> {}
+  async *stream(_prompt: string): AsyncIterable<string> { }
 }
 
 // -- Main -------------------------------------------------------
@@ -52,9 +52,9 @@ async function main() {
       path: "intro.txt",
       content: Buffer.from(
         "RAG stands for Retrieval-Augmented Generation. " +
-          "It combines information retrieval with large language models. " +
-          "The system first retrieves relevant context from a knowledge base, " +
-          "then uses an LLM to generate an answer based on that context."
+        "It combines information retrieval with large language models. " +
+        "The system first retrieves relevant context from a knowledge base, " +
+        "then uses an LLM to generate an answer based on that context."
       ),
     },
     {
@@ -79,9 +79,9 @@ Chunks are typically 200-500 tokens with 10-20% overlap.`
       path: "chunking.txt",
       content: Buffer.from(
         "Chunking splits documents into smaller pieces for embedding. " +
-          "Common strategies include fixed-size splitting, recursive splitting " +
-          "by semantic boundaries, and markdown-aware splitting that preserves " +
-          "headings and code blocks. Overlap between chunks helps maintain context."
+        "Common strategies include fixed-size splitting, recursive splitting " +
+        "by semantic boundaries, and markdown-aware splitting that preserves " +
+        "headings and code blocks. Overlap between chunks helps maintain context."
       ),
     },
   ];

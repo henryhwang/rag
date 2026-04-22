@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { SimpleQueryRewriter } from '../src/query/rewrite/simple-rewriter.js';
-import { LLMQueryRewriter } from '../src/query/rewrite/llm-rewriter.js';
-import type { LLMProvider } from '../src/types/index.js';
+import { SimpleQueryRewriter } from '../src/query/rewrite/simple-rewriter.ts';
+import { LLMQueryRewriter } from '../src/query/rewrite/llm-rewriter.ts';
+import type { LLMProvider } from '../src/types/index.ts';
 
 describe('SimpleQueryRewriter', () => {
   const rewriter = new SimpleQueryRewriter();

@@ -2,10 +2,10 @@
 // Dedicated Reranker — uses /v1/rerank endpoint (Jina/Cohere compatible)
 // Fast, cheap, and purpose-built for reranking (much better than chat/completions)
 // ============================================================
-import { Reranker } from '../types/index.ts';
+import { type Reranker } from '../types/index.ts';
 import { RerankError } from '../errors/index.ts';
 import { retryAsync } from '../utils/retry.ts';
-import { getBatchIndices, estimateTokens } from './batching.js';
+import { getBatchIndices, estimateTokens } from './batching.ts';
 
 export interface DedicatedRerankerConfig {
   apiKey?: string;
@@ -75,7 +75,7 @@ export class DedicatedReranker implements Reranker {
     }
 
     const scores: number[] = new Array(documents.length).fill(0);
-    
+
     // Precompute document sizes (character count as proxy for tokens)
     const docSizes = documents.map(d => d.length);
 

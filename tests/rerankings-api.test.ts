@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { EmbeddingError } from "../src/errors/index.ts";
-import { DedicatedReranker } from "../src/reranking/dedicatedReranker.js";
+import { DedicatedReranker } from "../src/reranking/dedicatedReranker.ts";
 
 const RERANK_API_BASE = "https://api.siliconflow.cn";
 const RERANK_MODEL = "BAAI/bge-reranker-v2-m3";

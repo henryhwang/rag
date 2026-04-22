@@ -2,7 +2,7 @@
 // Abstract base class for document parsers
 // ============================================================
 
-import { DocumentParser, FileInput, ParsedDocument } from '../types/index.ts';
+import type { DocumentParser, FileInput, ParsedDocument } from '../types/index.ts';
 import { ParseError } from '../errors/index.ts';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';

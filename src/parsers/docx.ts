@@ -3,7 +3,7 @@
 // Loaded lazily so the core library stays lightweight.
 // ============================================================
 
-import { FileInput, ParsedDocument } from '../types/index.ts';
+import type { FileInput, ParsedDocument } from '../types/index.ts';
 import { ParseError } from '../errors/index.ts';
 import { BaseDocumentParser } from './base.ts';
 import * as path from 'node:path';

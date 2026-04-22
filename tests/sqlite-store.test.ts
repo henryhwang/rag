@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { SQLiteVectorStore } from '../src/storage/sqlite.js';
-import { VectorStoreError } from '../src/errors/index.js';
+import { SQLiteVectorStore } from '../src/storage/sqlite.ts';
+import { VectorStoreError } from '../src/errors/index.ts';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
